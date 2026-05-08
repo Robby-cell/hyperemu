@@ -182,6 +182,21 @@ fn decode_data_proc_or_misc(cond: Condition, raw: u32, is_immediate_op2: bool) -
         return Instr::Bkpt { imm16 };
     }
 
+    if !is_immediate_op2 {
+        if (raw & 0x0FFFFFF0) == 0x012FFF10 {
+            return Instr::Bx {
+                cond,
+                rm: (raw & 0xF) as usize,
+            };
+        }
+        if (raw & 0x0FFFFFF0) == 0x012FFF30 {
+            return Instr::Blx {
+                cond,
+                rm: (raw & 0xF) as usize,
+            };
+        }
+    }
+
     if !is_immediate_op2 && ((raw & 0x00000090) == 0x00000090) {
         let rm = (raw & 0xF) as usize;
         let rs = ((raw >> 8) & 0xF) as usize;
@@ -334,13 +349,6 @@ fn decode_data_proc_or_misc(cond: Condition, raw: u32, is_immediate_op2: bool) -
                 }
                 _ => {}
             }
-        }
-
-        if (raw & 0x0FFFFFF0) == 0x012FFF10 {
-            return Instr::Bx { cond, rm };
-        }
-        if (raw & 0x0FFFFFF0) == 0x012FFF30 {
-            return Instr::Blx { cond, rm };
         }
     }
 

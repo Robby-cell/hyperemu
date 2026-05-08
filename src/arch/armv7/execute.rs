@@ -709,7 +709,8 @@ pub fn execute_instr(
             cpu.regs[REG_PC] = (pc_base as i32).wrapping_add(target) as u32;
         }
         Instr::Bl { target, .. } => {
-            cpu.regs[REG_LR] = cpu.regs[REG_PC].wrapping_sub(4);
+            cpu.regs[REG_LR] = cpu.regs[REG_PC];
+
             let pc_base = cpu.regs[REG_PC].wrapping_add(4);
             cpu.regs[REG_PC] = (pc_base as i32).wrapping_add(target) as u32;
         }
@@ -719,7 +720,8 @@ pub fn execute_instr(
             cpu.regs[REG_PC] = val & !1;
         }
         Instr::Blx { rm, .. } => {
-            cpu.regs[REG_LR] = cpu.regs[REG_PC].wrapping_sub(4);
+            cpu.regs[REG_LR] = cpu.regs[REG_PC];
+
             let val = cpu.regs[rm];
             cpu.set_t((val & 1) == 1);
             cpu.regs[REG_PC] = val & !1;
