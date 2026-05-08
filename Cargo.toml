@@ -1,0 +1,19 @@
+[package]
+name = "hyperemu"
+version = "0.1.0"
+edition = "2024"
+description = "A multi-architecture hardware emulator"
+
+[features]
+default = ["full"]
+full = ["elf", "armv7", "gdb"]
+elf = ["dep:goblin"]
+gdb = ["dep:gdbstub"]
+armv7 = []
+
+[dependencies]
+bitflags = "2.11"
+thiserror = "2.0"
+log = "0.4"
+goblin = { version = "0.10", optional = true }
+gdbstub = { version = "0.7", optional = true }
