@@ -49,8 +49,13 @@ impl HyperEmu {
     }
 
     /// Executes one CPU instruction.
-    pub fn step(&mut self) -> Result<u32, EmuError> {
+    pub fn step(&mut self) -> Result<(), EmuError> {
         self.cpu.step(&mut self.bus, &mut self.hooks)
+    }
+
+    pub fn step_batch(&mut self, max_instrs: u32) -> Result<u32, EmuError> {
+        self.cpu
+            .step_batch(&mut self.bus, &mut self.hooks, max_instrs)
     }
 
     /// Starts execution from a given point until an error or intentional stop.
@@ -62,7 +67,7 @@ impl HyperEmu {
         self.reg_write(13, sp)?;
 
         loop {
-            let _ = self.step()?;
+            let _ = self.step_batch(256)?;
         }
     }
 }

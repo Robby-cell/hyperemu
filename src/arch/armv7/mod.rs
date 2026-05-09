@@ -225,6 +225,85 @@ impl Armv7Cpu {
     }
 }
 
+/// Options for highly specific execution control (e.g., skipping hooks for max speed)
+#[derive(Debug, Clone, Copy)]
+pub struct ExecOptions {
+    pub run_code_hooks: bool,
+}
+
+impl Default for ExecOptions {
+    fn default() -> Self {
+        Self {
+            run_code_hooks: true,
+        }
+    }
+}
+
+impl Armv7Cpu {
+    /// Internal helper: Standard execution
+    #[inline(always)]
+    fn execute_one(
+        &mut self,
+        bus: &mut MemoryBus,
+        hooks: &mut HookRegistry,
+    ) -> Result<bool, EmuError> {
+        self.execute_one_extended(
+            bus,
+            hooks,
+            &ExecOptions {
+                run_code_hooks: !hooks.code_hooks.is_empty(),
+            },
+        )
+    }
+
+    #[inline(always)]
+    pub fn execute_one_extended(
+        &mut self,
+        bus: &mut MemoryBus,
+        hooks: &mut HookRegistry,
+        options: &ExecOptions,
+    ) -> Result<bool, EmuError> {
+        let pc_val = self.regs[REG_PC];
+
+        // Refresh fetch pointer if we crossed a region boundary
+        if pc_val < self.fetch_base || pc_val >= self.fetch_base + self.fetch_len {
+            self.refresh_fetch_ptr(bus)?;
+        }
+
+        // Option: Conditionally skip code hooks for pure JIT speed!
+        if options.run_code_hooks && !hooks.code_hooks.is_empty() {
+            hooks.trigger_code(self, bus, pc_val as u64)?;
+        }
+
+        let raw_instr = unsafe {
+            let offset = (pc_val - self.fetch_base) as usize;
+            let ptr = self.fetch_slice.add(offset) as *const u32;
+            ptr.read_unaligned()
+        };
+
+        if options.run_code_hooks {
+            hooks.trigger_code(self, bus, pc_val as u64)?;
+        }
+
+        let next_pc = pc_val.wrapping_add(4);
+        self.regs[REG_PC] = next_pc;
+
+        let cache_idx = ((pc_val >> 2) as usize) & (DECODE_CACHE_SIZE - 1);
+        let instr = if self.cache_tags[cache_idx] == pc_val {
+            self.cache_instrs[cache_idx].clone()
+        } else {
+            let decoded = decode::decode_arm(raw_instr);
+            self.cache_tags[cache_idx] = pc_val;
+            self.cache_instrs[cache_idx] = decoded.clone();
+            decoded
+        };
+
+        execute::execute_instr(self, instr, bus, hooks)?;
+
+        Ok(self.regs[REG_PC] != next_pc)
+    }
+}
+
 impl Cpu for Armv7Cpu {
     fn init(_mode: GlobalCpuMode) -> Result<Self, EmuError> {
         Ok(Self {
@@ -244,51 +323,50 @@ impl Cpu for Armv7Cpu {
     }
 
     #[inline(always)]
-    fn step(&mut self, bus: &mut MemoryBus, hooks: &mut HookRegistry) -> Result<u32, EmuError> {
-        let mut block_run_count = 0;
-        let has_hooks = !hooks.code_hooks.is_empty();
+    fn step(&mut self, bus: &mut MemoryBus, hooks: &mut HookRegistry) -> Result<(), EmuError> {
+        self.execute_one(bus, hooks)?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn step_batch(
+        &mut self,
+        bus: &mut MemoryBus,
+        hooks: &mut HookRegistry,
+        max_instrs: u32,
+    ) -> Result<u32, EmuError> {
+        let mut total_executed = 0;
+        let run_code_hooks = !hooks.code_hooks.is_empty();
+
+        let options = &ExecOptions { run_code_hooks };
 
         // 16-instruction hot loop
-        while block_run_count < 16 {
-            let pc_val = self.regs[REG_PC];
+        while total_executed < max_instrs {
+            let mut branched = false;
 
-            // Refresh fetch pointer if we crossed a region boundary
-            if pc_val < self.fetch_base || pc_val >= self.fetch_base + self.fetch_len {
-                self.refresh_fetch_ptr(bus)?;
+            // INNER HOT LOOP: Hardcoded to 16.
+            // LLVM will completely unroll this into 16 sequential executions!
+            for _ in 0..16 {
+                if total_executed >= max_instrs {
+                    break;
+                }
+
+                branched = self.execute_one_extended(bus, hooks, &options)?;
+                total_executed += 1;
+
+                if branched {
+                    break;
+                }
             }
 
-            let raw_instr = unsafe {
-                let offset = (pc_val - self.fetch_base) as usize;
-                let ptr = self.fetch_slice.add(offset) as *const u32;
-                ptr.read_unaligned()
-            };
-
-            if has_hooks {
-                hooks.trigger_code(self, bus, pc_val as u64)?;
-            }
-
-            let next_pc = pc_val.wrapping_add(4);
-            self.regs[REG_PC] = next_pc;
-
-            let cache_idx = ((pc_val >> 2) as usize) & (DECODE_CACHE_SIZE - 1);
-            let instr = if self.cache_tags[cache_idx] == pc_val {
-                self.cache_instrs[cache_idx].clone()
-            } else {
-                let decoded = decode::decode_arm(raw_instr);
-                self.cache_tags[cache_idx] = pc_val;
-                self.cache_instrs[cache_idx] = decoded.clone();
-                decoded
-            };
-
-            execute::execute_instr(self, instr, bus, hooks)?;
-
-            if self.regs[REG_PC] != next_pc {
+            // If a branch broke the unrolled block, we yield back to the host.
+            // This guarantees the host CPU's instruction pipeline stays perfectly clean.
+            if branched {
                 break;
             }
-            block_run_count += 1;
         }
 
-        Ok(block_run_count)
+        Ok(total_executed)
     }
 
     fn read_reg(&self, reg_id: usize) -> Result<u64, EmuError> {
