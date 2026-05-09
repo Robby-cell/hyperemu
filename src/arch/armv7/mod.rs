@@ -6,12 +6,12 @@ pub mod registers;
 #[cfg(test)]
 mod tests;
 
+use crate::arch::armv7::instr::Instr;
 use crate::bus::MemoryBus;
 use crate::config::CpuMode as GlobalCpuMode;
 use crate::error::EmuError;
 use crate::hook::HookRegistry;
 use crate::interface::Cpu;
-use instr::Instr;
 use registers::*;
 
 const DECODE_CACHE_SIZE: usize = 1024;
@@ -23,8 +23,14 @@ pub struct Armv7Cpu {
     pub banked_lr: [u32; 6],
     pub banked_spsr: [u32; 6],
 
-    decode_tags: Box<[u32]>,
-    decode_instrs: Box<[Instr]>,
+    // Instead of calling the Bus, we fetch directly from this slice
+    fetch_slice: *const u8,
+    fetch_base: u32,
+    fetch_len: u32,
+
+    // We store a simple, flat representation of the instruction
+    cache_tags: Box<[u32]>,
+    cache_instrs: Box<[Instr]>,
 }
 
 impl Armv7Cpu {
@@ -197,6 +203,28 @@ impl Armv7Cpu {
     }
 }
 
+impl Armv7Cpu {
+    /// Forces the CPU to refresh its direct pointer to the code RAM.
+    /// This is called only when the PC leaves the current 4KB page.
+    fn refresh_fetch_ptr(&mut self, bus: &mut MemoryBus) -> Result<(), EmuError> {
+        let pc = self.regs[REG_PC];
+        // We ask the bus for a direct reference to the underlying RAM
+        // If it's a BusDevice::Ram, we get the slice. If it's Custom, we fail fast.
+        let (device, _offset) = bus.resolve_mut(pc as u64)?;
+
+        if let crate::bus::BusDevice::Ram(ram) = device {
+            self.fetch_slice = ram.data.as_ptr();
+            self.fetch_base = pc;
+            self.fetch_len = ram.data.len() as u32;
+            Ok(())
+        } else {
+            Err(EmuError::DeviceError(
+                "Cannot execute from non-RAM device".into(),
+            ))
+        }
+    }
+}
+
 impl Cpu for Armv7Cpu {
     fn init(_mode: GlobalCpuMode) -> Result<Self, EmuError> {
         Ok(Self {
@@ -206,33 +234,61 @@ impl Cpu for Armv7Cpu {
             banked_lr: [0; 6],
             banked_spsr: [0; 6],
 
-            // Init cache with default values
-            decode_tags: vec![0xFFFFFFFF; DECODE_CACHE_SIZE].into_boxed_slice(),
-            decode_instrs: vec![Instr::Unknown(0); DECODE_CACHE_SIZE].into_boxed_slice(),
+            fetch_slice: std::ptr::null(),
+            fetch_base: 0,
+            fetch_len: 0,
+
+            cache_instrs: vec![Instr::Unknown(0); DECODE_CACHE_SIZE].into_boxed_slice(),
+            cache_tags: vec![0xFFFFFFFF; DECODE_CACHE_SIZE].into_boxed_slice(),
         })
     }
 
     #[inline(always)]
-    fn step(&mut self, bus: &mut MemoryBus, hooks: &mut HookRegistry) -> Result<(), EmuError> {
-        let pc_val = self.regs[REG_PC];
+    fn step(&mut self, bus: &mut MemoryBus, hooks: &mut HookRegistry) -> Result<u32, EmuError> {
+        let mut block_run_count = 0;
+        let has_hooks = !hooks.code_hooks.is_empty();
 
-        hooks.trigger_code(self, bus, pc_val as u64)?;
+        // 16-instruction hot loop
+        while block_run_count < 16 {
+            let pc_val = self.regs[REG_PC];
 
-        let raw_instr = bus.read_32(pc_val as u64)?;
-        self.regs[REG_PC] = self.regs[REG_PC].wrapping_add(4);
+            // Refresh fetch pointer if we crossed a region boundary
+            if pc_val < self.fetch_base || pc_val >= self.fetch_base + self.fetch_len {
+                self.refresh_fetch_ptr(bus)?;
+            }
 
-        let cache_idx = ((pc_val >> 2) as usize) % DECODE_CACHE_SIZE;
+            let raw_instr = unsafe {
+                let offset = (pc_val - self.fetch_base) as usize;
+                let ptr = self.fetch_slice.add(offset) as *const u32;
+                ptr.read_unaligned()
+            };
 
-        // If it's a miss, update the cache
-        if self.decode_tags[cache_idx] != pc_val {
-            self.decode_tags[cache_idx] = pc_val;
-            self.decode_instrs[cache_idx] = decode::decode_arm(raw_instr);
+            if has_hooks {
+                hooks.trigger_code(self, bus, pc_val as u64)?;
+            }
+
+            let next_pc = pc_val.wrapping_add(4);
+            self.regs[REG_PC] = next_pc;
+
+            let cache_idx = ((pc_val >> 2) as usize) & (DECODE_CACHE_SIZE - 1);
+            let instr = if self.cache_tags[cache_idx] == pc_val {
+                self.cache_instrs[cache_idx].clone()
+            } else {
+                let decoded = decode::decode_arm(raw_instr);
+                self.cache_tags[cache_idx] = pc_val;
+                self.cache_instrs[cache_idx] = decoded.clone();
+                decoded
+            };
+
+            execute::execute_instr(self, instr, bus, hooks)?;
+
+            if self.regs[REG_PC] != next_pc {
+                break;
+            }
+            block_run_count += 1;
         }
 
-        // Pass by reference! Zero memory copying overhead.
-        let instr = self.decode_instrs[cache_idx].clone();
-
-        execute::execute_instr(self, &instr, bus, hooks)
+        Ok(block_run_count)
     }
 
     fn read_reg(&self, reg_id: usize) -> Result<u64, EmuError> {

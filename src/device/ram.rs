@@ -2,7 +2,7 @@ use crate::device::Device;
 use crate::error::EmuError;
 
 pub struct Ram {
-    data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 impl Ram {

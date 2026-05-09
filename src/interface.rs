@@ -9,7 +9,7 @@ pub trait Cpu {
     where
         Self: Sized;
 
-    fn step(&mut self, bus: &mut MemoryBus, hooks: &mut HookRegistry) -> Result<(), EmuError>;
+    fn step(&mut self, bus: &mut MemoryBus, hooks: &mut HookRegistry) -> Result<u32, EmuError>;
     fn read_reg(&self, reg_id: usize) -> Result<u64, EmuError>;
     fn write_reg(&mut self, reg_id: usize, val: u64) -> Result<(), EmuError>;
     fn pc(&self) -> u64;

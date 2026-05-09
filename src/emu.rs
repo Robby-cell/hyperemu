@@ -49,9 +49,7 @@ impl HyperEmu {
     }
 
     /// Executes one CPU instruction.
-    pub fn step(&mut self) -> Result<(), EmuError> {
-        // By passing `&mut self.bus` and `&mut self.hooks`, we temporarily lend
-        // access without tangling lifetimes or using RefCell.
+    pub fn step(&mut self) -> Result<u32, EmuError> {
         self.cpu.step(&mut self.bus, &mut self.hooks)
     }
 
@@ -64,7 +62,7 @@ impl HyperEmu {
         self.reg_write(13, sp)?;
 
         loop {
-            self.step()?;
+            let _ = self.step()?;
         }
     }
 }

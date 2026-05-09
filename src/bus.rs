@@ -119,15 +119,15 @@ impl MemoryBus {
 
     /// Helper to find the correct device and translate absolute address to offset
     #[inline(always)]
-    fn resolve_mut(&mut self, addr: u64) -> Result<(&mut BusDevice, u64), EmuError> {
-        // 1. TLB Fast-Path (Hits 99% of the time for sequential execution)
+    pub fn resolve_mut(&mut self, addr: u64) -> Result<(&mut BusDevice, u64), EmuError> {
+        // TLB Fast-Path (Hits 99% of the time for sequential execution)
         if let Some(&MemoryRegion { start, size, .. }) = self.regions.get(self.last_region_idx) {
             if addr >= start && addr < start + size {
                 return Ok((&mut self.regions[self.last_region_idx].device, addr - start));
             }
         }
 
-        // 2. Fallback to Binary Search
+        // Fallback to Binary Search
         let idx = self
             .regions
             .binary_search_by(|r| {
