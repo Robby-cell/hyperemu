@@ -1,6 +1,5 @@
-use crate::bus::{MemoryBus, Perms};
+use crate::bus::{BusDevice, MemoryBus, Perms};
 use crate::config::{Arch, CpuMode};
-use crate::device::Device;
 use crate::error::EmuError;
 use crate::hook::HookRegistry;
 use crate::interface::Cpu;
@@ -37,7 +36,7 @@ impl HyperEmu {
         })
     }
 
-    pub fn mem_map(&mut self, start: u64, size: u64, perms: Perms, device: Box<dyn Device>) {
+    pub fn mem_map(&mut self, start: u64, size: u64, perms: Perms, device: BusDevice) {
         self.bus.map(start, size, perms, device);
     }
 

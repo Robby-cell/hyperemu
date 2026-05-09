@@ -50,7 +50,7 @@ pub struct HookRegistry {
 }
 
 impl HookRegistry {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             code_hooks: Vec::new(),
             interrupt_hooks: Vec::new(),
@@ -71,6 +71,7 @@ impl HookRegistry {
         self.interrupt_hooks.push(Box::new(hook));
     }
 
+    #[inline(always)]
     pub fn trigger_code(
         &mut self,
         cpu: &mut dyn Cpu,
@@ -85,6 +86,7 @@ impl HookRegistry {
 
     /// Triggers the interrupt hooks sequentially.
     /// Returns `Ok(true)` if a hook consumed the interrupt, or `Ok(false)` if it was unhandled.
+    #[inline(always)]
     pub fn trigger_interrupt(
         &mut self,
         cpu: &mut dyn Cpu,

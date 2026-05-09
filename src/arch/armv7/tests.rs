@@ -13,7 +13,7 @@ fn setup_test_env() -> (Armv7Cpu, MemoryBus, HookRegistry) {
     let mut bus = MemoryBus::new();
     let hooks = HookRegistry::new();
 
-    bus.map(0x1000, 0x1000, Perms::RWX, Box::new(Ram::new(0x1000)));
+    bus.map(0x1000, 0x1000, Perms::RWX, Ram::new(0x1000).into());
 
     (cpu, bus, hooks)
 }
@@ -38,7 +38,7 @@ fn test_alu_add_flags() {
 
     cpu.regs[1] = 5;
     cpu.regs[2] = 10;
-    execute_instr(&mut cpu, instr, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(cpu.regs[0], 15);
     assert_eq!(cpu.get_z(), false);
@@ -57,7 +57,7 @@ fn test_alu_add_flags() {
         },
     };
     cpu.regs[1] = 0xFFFFFFFF;
-    execute_instr(&mut cpu, instr_carry, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr_carry, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(cpu.regs[0], 1);
     assert_eq!(cpu.get_c(), true, "Carry flag should be set");
@@ -74,7 +74,7 @@ fn test_alu_add_flags() {
         },
     };
     cpu.regs[1] = 0x7FFFFFFF;
-    execute_instr(&mut cpu, instr_overflow, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr_overflow, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(cpu.regs[0], 0x80000000);
     assert_eq!(cpu.get_v(), true, "Overflow flag should be set");
@@ -97,7 +97,7 @@ fn test_alu_sub_flags() {
     };
 
     cpu.regs[1] = 10;
-    execute_instr(&mut cpu, instr, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(cpu.regs[0], 5);
     assert_eq!(cpu.get_c(), true, "Carry should be 1 (No borrow occurred)");
@@ -113,7 +113,7 @@ fn test_alu_sub_flags() {
         },
     };
     cpu.regs[1] = 5;
-    execute_instr(&mut cpu, instr_borrow, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr_borrow, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(cpu.regs[0], 0xFFFFFFFB);
     assert_eq!(cpu.get_n(), true, "Negative flag should be set");
@@ -138,7 +138,7 @@ fn test_shifts() {
     };
 
     cpu.regs[1] = 0x00000003;
-    execute_instr(&mut cpu, instr_lsl, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr_lsl, &mut bus, &mut hooks).unwrap();
     assert_eq!(cpu.regs[0], 12);
 
     let instr_lsr_0 = Instr::Mov {
@@ -154,7 +154,7 @@ fn test_shifts() {
         },
     };
     cpu.regs[1] = 0x80000000;
-    execute_instr(&mut cpu, instr_lsr_0, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr_lsr_0, &mut bus, &mut hooks).unwrap();
     assert_eq!(cpu.regs[0], 0);
     assert_eq!(cpu.get_c(), true, "Carry out should be original MSB (1)");
     assert_eq!(cpu.get_z(), true, "Result is 0, so Z flag set");
@@ -179,7 +179,7 @@ fn test_push_pop_stack() {
         w: true,
     };
 
-    execute_instr(&mut cpu, push_instr, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &push_instr, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(cpu.regs[13], 0x1100 - 0xC);
 
@@ -200,7 +200,7 @@ fn test_push_pop_stack() {
         w: true,
     };
 
-    execute_instr(&mut cpu, pop_instr, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &pop_instr, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(cpu.regs[0], 0xAAAA);
     assert_eq!(cpu.regs[1], 0xBBBB);
@@ -235,7 +235,7 @@ fn test_conditional_execution() {
 
     // Run with Z = 0 (Condition Fails)
     cpu.set_z(false);
-    execute_instr(&mut cpu, instr_eq, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr_eq, &mut bus, &mut hooks).unwrap();
     assert_eq!(cpu.regs[0], 0, "Instruction should NOT have executed");
 
     // Re-create instruction (since it was moved), Run with Z = 1 (Condition Passes)
@@ -253,7 +253,7 @@ fn test_conditional_execution() {
         },
     };
     cpu.set_z(true);
-    execute_instr(&mut cpu, instr_eq, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr_eq, &mut bus, &mut hooks).unwrap();
     assert_eq!(cpu.regs[0], 30, "Instruction SHOULD have executed");
 }
 
@@ -274,7 +274,7 @@ fn test_umull_64bit_multiply() {
     // 0xFFFFFFFF * 0xFFFFFFFF = 0xFFFFFFFE_00000001
     cpu.regs[2] = 0xFFFFFFFF;
     cpu.regs[3] = 0xFFFFFFFF;
-    execute_instr(&mut cpu, instr, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(cpu.regs[0], 0x00000001, "Low 32-bits incorrect");
     assert_eq!(cpu.regs[1], 0xFFFFFFFE, "High 32-bits incorrect");
@@ -291,7 +291,7 @@ fn test_rev_endian_swap() {
     };
 
     cpu.regs[1] = 0x11223344;
-    execute_instr(&mut cpu, instr, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(cpu.regs[0], 0x44332211, "Byte reversal failed");
 }
@@ -312,7 +312,7 @@ fn test_ubfx_bitfield_extract() {
     // 0xABCD = 1010_1011_1100_1101
     // Bits 4 to 7 are 1100 (0xC)
     cpu.regs[1] = 0xABCD;
-    execute_instr(&mut cpu, instr, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(
         cpu.regs[0], 0x0000000C,
@@ -337,7 +337,7 @@ fn test_sbfx_bitfield_extract_signed() {
     // Bits 4 to 7 are 1111 (0xF). As a 4-bit signed number, 0xF is -1.
     // Sign extended to 32 bits, this should become 0xFFFFFFFF.
     cpu.regs[1] = 0xABFD;
-    execute_instr(&mut cpu, instr, &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &instr, &mut bus, &mut hooks).unwrap();
 
     assert_eq!(cpu.regs[0], 0xFFFFFFFF, "Signed bitfield extraction failed");
 }
@@ -393,7 +393,7 @@ fn test_real_world_syscall_interception() {
     // Execute the SVC instruction
     execute_instr(
         &mut cpu,
-        Instr::Svc {
+        &Instr::Svc {
             cond: Condition::Al,
             imm: 0,
         },
@@ -420,7 +420,7 @@ fn test_gui_led_blinking() {
     // Map the GPIO device to memory address 0x4000_0000
     // We pass a clone of the Arc to the device so both the CPU and the GUI own it.
     let gpio_device = Box::new(GpioPort::new(Arc::clone(&gui_led_state)));
-    bus.map(0x4000_0000, 0x1000, Perms::RW, gpio_device);
+    bus.map(0x4000_0000, 0x1000, Perms::RW, gpio_device.into());
 
     // Write an Assembly Program to blink the 1st LED (bit 0)
     /*
@@ -452,20 +452,20 @@ fn test_gui_led_blinking() {
 
     // Setup instructions
     let instr = bus.read_32(cpu.regs[15] as u64).unwrap();
-    execute_instr(&mut cpu, decode_arm(instr), &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &decode_arm(instr), &mut bus, &mut hooks).unwrap();
     cpu.regs[15] += 4;
 
     let instr = bus.read_32(cpu.regs[15] as u64).unwrap();
-    execute_instr(&mut cpu, decode_arm(instr), &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &decode_arm(instr), &mut bus, &mut hooks).unwrap();
     cpu.regs[15] += 4;
 
     let instr = bus.read_32(cpu.regs[15] as u64).unwrap();
-    execute_instr(&mut cpu, decode_arm(instr), &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &decode_arm(instr), &mut bus, &mut hooks).unwrap();
     cpu.regs[15] += 4;
 
     // Execute STRB r2, [r1] (Turn LED ON)
     let instr = bus.read_32(cpu.regs[15] as u64).unwrap();
-    execute_instr(&mut cpu, decode_arm(instr), &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &decode_arm(instr), &mut bus, &mut hooks).unwrap();
     cpu.regs[15] += 4;
 
     // GUI thread checks the screen...
@@ -477,7 +477,7 @@ fn test_gui_led_blinking() {
 
     // Execute STRB r3, [r1] (Turn LED OFF)
     let instr = bus.read_32(cpu.regs[15] as u64).unwrap();
-    execute_instr(&mut cpu, decode_arm(instr), &mut bus, &mut hooks).unwrap();
+    execute_instr(&mut cpu, &decode_arm(instr), &mut bus, &mut hooks).unwrap();
     cpu.regs[15] += 4;
     let _ = cpu.regs[15];
 

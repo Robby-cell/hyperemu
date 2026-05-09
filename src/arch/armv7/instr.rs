@@ -62,7 +62,7 @@ pub enum Operand2 {
     Register { rm: usize, shift: Shift },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Instr {
     // Data Processing
     And {

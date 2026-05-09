@@ -11,7 +11,10 @@ use crate::config::CpuMode as GlobalCpuMode;
 use crate::error::EmuError;
 use crate::hook::HookRegistry;
 use crate::interface::Cpu;
+use instr::Instr;
 use registers::*;
+
+const DECODE_CACHE_SIZE: usize = 1024;
 
 pub struct Armv7Cpu {
     pub regs: [u32; 16],
@@ -19,6 +22,9 @@ pub struct Armv7Cpu {
     pub banked_sp: [u32; 6],
     pub banked_lr: [u32; 6],
     pub banked_spsr: [u32; 6],
+
+    decode_tags: Box<[u32]>,
+    decode_instrs: Box<[Instr]>,
 }
 
 impl Armv7Cpu {
@@ -199,20 +205,34 @@ impl Cpu for Armv7Cpu {
             banked_sp: [0; 6],
             banked_lr: [0; 6],
             banked_spsr: [0; 6],
+
+            // Init cache with default values
+            decode_tags: vec![0xFFFFFFFF; DECODE_CACHE_SIZE].into_boxed_slice(),
+            decode_instrs: vec![Instr::Unknown(0); DECODE_CACHE_SIZE].into_boxed_slice(),
         })
     }
 
+    #[inline(always)]
     fn step(&mut self, bus: &mut MemoryBus, hooks: &mut HookRegistry) -> Result<(), EmuError> {
         let pc_val = self.regs[REG_PC];
 
-        // Pass `self` (which gets coerced to &mut dyn Cpu) and the bus
         hooks.trigger_code(self, bus, pc_val as u64)?;
 
         let raw_instr = bus.read_32(pc_val as u64)?;
         self.regs[REG_PC] = self.regs[REG_PC].wrapping_add(4);
 
-        let instr = decode::decode_arm(raw_instr);
-        execute::execute_instr(self, instr, bus, hooks)
+        let cache_idx = ((pc_val >> 2) as usize) % DECODE_CACHE_SIZE;
+
+        // If it's a miss, update the cache
+        if self.decode_tags[cache_idx] != pc_val {
+            self.decode_tags[cache_idx] = pc_val;
+            self.decode_instrs[cache_idx] = decode::decode_arm(raw_instr);
+        }
+
+        // Pass by reference! Zero memory copying overhead.
+        let instr = self.decode_instrs[cache_idx].clone();
+
+        execute::execute_instr(self, &instr, bus, hooks)
     }
 
     fn read_reg(&self, reg_id: usize) -> Result<u64, EmuError> {

@@ -40,7 +40,7 @@ pub fn load_elf(bus: &mut MemoryBus, data: &[u8]) -> Result<LoadInfo, EmuError> 
                 vaddr,
                 perms
             );
-            bus.map(vaddr, memsz, perms, Box::new(Ram::new(memsz as usize)));
+            bus.map(vaddr, memsz, perms, Ram::new(memsz as usize).into());
 
             // Copy the actual file data into the newly mapped RAM
             // If memsz > filesz, the remainder is left as 0s (This correctly handles the .bss section).

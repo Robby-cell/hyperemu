@@ -7,7 +7,7 @@ use crate::hook::HookRegistry;
 
 pub fn execute_instr(
     cpu: &mut Armv7Cpu,
-    instr: Instr,
+    instr: &Instr,
     bus: &mut MemoryBus,
     hooks: &mut HookRegistry,
 ) -> Result<(), EmuError> {
@@ -17,7 +17,7 @@ pub fn execute_instr(
         return Ok(());
     }
 
-    match instr {
+    match *instr {
         // Data Processing
         Instr::And { s, rd, rn, op2, .. } => {
             let (val_op2, carry_out) = evaluate_operand2(cpu, op2);
