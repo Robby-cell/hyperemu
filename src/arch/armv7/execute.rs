@@ -21,7 +21,7 @@ pub fn execute_instr(
         // Data Processing
         Instr::And { s, rd, rn, op2, .. } => {
             let (val_op2, carry_out) = evaluate_operand2(cpu, op2);
-            let result = cpu.regs[rn as usize] & val_op2;
+            let result = cpu.reg(rn) & val_op2;
             cpu.regs[rd as usize] = result;
             if s {
                 set_logic_flags(cpu, result, carry_out);
@@ -29,7 +29,7 @@ pub fn execute_instr(
         }
         Instr::Eor { s, rd, rn, op2, .. } => {
             let (val_op2, carry_out) = evaluate_operand2(cpu, op2);
-            let result = cpu.regs[rn as usize] ^ val_op2;
+            let result = cpu.reg(rn) ^ val_op2;
             cpu.regs[rd as usize] = result;
             if s {
                 set_logic_flags(cpu, result, carry_out);
@@ -37,58 +37,58 @@ pub fn execute_instr(
         }
         Instr::Sub { s, rd, rn, op2, .. } => {
             let (val_op2, _) = evaluate_operand2(cpu, op2);
-            let result = do_sub(cpu, cpu.regs[rn as usize], val_op2, s);
+            let result = do_sub(cpu, cpu.reg(rn), val_op2, s);
             cpu.regs[rd as usize] = result;
         }
         Instr::Rsb { s, rd, rn, op2, .. } => {
             let (val_op2, _) = evaluate_operand2(cpu, op2);
-            let result = do_sub(cpu, val_op2, cpu.regs[rn as usize], s);
+            let result = do_sub(cpu, val_op2, cpu.reg(rn), s);
             cpu.regs[rd as usize] = result;
         }
         Instr::Add { s, rd, rn, op2, .. } => {
             let (val_op2, _) = evaluate_operand2(cpu, op2);
-            let result = do_add(cpu, cpu.regs[rn as usize], val_op2, s);
+            let result = do_add(cpu, cpu.reg(rn), val_op2, s);
             cpu.regs[rd as usize] = result;
         }
         Instr::Adc { s, rd, rn, op2, .. } => {
             let (val_op2, _) = evaluate_operand2(cpu, op2);
             let carry_val = if cpu.get_c() { 1 } else { 0 };
-            let result = do_add_carry(cpu, cpu.regs[rn as usize], val_op2, carry_val, s);
+            let result = do_add_carry(cpu, cpu.reg(rn), val_op2, carry_val, s);
             cpu.regs[rd as usize] = result;
         }
         Instr::Sbc { s, rd, rn, op2, .. } => {
             let (val_op2, _) = evaluate_operand2(cpu, op2);
             let not_carry = if cpu.get_c() { 0 } else { 1 };
-            let result = do_sub_carry(cpu, cpu.regs[rn as usize], val_op2, not_carry, s);
+            let result = do_sub_carry(cpu, cpu.reg(rn), val_op2, not_carry, s);
             cpu.regs[rd as usize] = result;
         }
         Instr::Rsc { s, rd, rn, op2, .. } => {
             let (val_op2, _) = evaluate_operand2(cpu, op2);
             let not_carry = if cpu.get_c() { 0 } else { 1 };
-            let result = do_sub_carry(cpu, val_op2, cpu.regs[rn as usize], not_carry, s);
+            let result = do_sub_carry(cpu, val_op2, cpu.reg(rn), not_carry, s);
             cpu.regs[rd as usize] = result;
         }
         Instr::Tst { rn, op2, .. } => {
             let (val_op2, carry_out) = evaluate_operand2(cpu, op2);
-            let result = cpu.regs[rn as usize] & val_op2;
+            let result = cpu.reg(rn) & val_op2;
             set_logic_flags(cpu, result, carry_out);
         }
         Instr::Teq { rn, op2, .. } => {
             let (val_op2, carry_out) = evaluate_operand2(cpu, op2);
-            let result = cpu.regs[rn as usize] ^ val_op2;
+            let result = cpu.reg(rn) ^ val_op2;
             set_logic_flags(cpu, result, carry_out);
         }
         Instr::Cmp { rn, op2, .. } => {
             let (val_op2, _) = evaluate_operand2(cpu, op2);
-            do_sub(cpu, cpu.regs[rn as usize], val_op2, true);
+            do_sub(cpu, cpu.reg(rn), val_op2, true);
         }
         Instr::Cmn { rn, op2, .. } => {
             let (val_op2, _) = evaluate_operand2(cpu, op2);
-            do_add(cpu, cpu.regs[rn as usize], val_op2, true);
+            do_add(cpu, cpu.reg(rn), val_op2, true);
         }
         Instr::Orr { s, rd, rn, op2, .. } => {
             let (val_op2, carry_out) = evaluate_operand2(cpu, op2);
-            let result = cpu.regs[rn as usize] | val_op2;
+            let result = cpu.reg(rn) | val_op2;
             cpu.regs[rd as usize] = result;
             if s {
                 set_logic_flags(cpu, result, carry_out);
@@ -103,7 +103,7 @@ pub fn execute_instr(
         }
         Instr::Bic { s, rd, rn, op2, .. } => {
             let (val_op2, carry_out) = evaluate_operand2(cpu, op2);
-            let result = cpu.regs[rn as usize] & !val_op2;
+            let result = cpu.reg(rn) & !val_op2;
             cpu.regs[rd as usize] = result;
             if s {
                 set_logic_flags(cpu, result, carry_out);
@@ -163,7 +163,7 @@ pub fn execute_instr(
 
         // Multiplies
         Instr::Mul { s, rd, rm, rs, .. } => {
-            let result = cpu.regs[rm as usize].wrapping_mul(cpu.regs[rs as usize]);
+            let result = cpu.reg(rm).wrapping_mul(cpu.reg(rs));
             cpu.regs[rd as usize] = result;
             if s {
                 cpu.set_n((result >> 31) == 1);
@@ -173,8 +173,8 @@ pub fn execute_instr(
         Instr::Mla {
             s, rd, rm, rs, rn, ..
         } => {
-            let mul = cpu.regs[rm as usize].wrapping_mul(cpu.regs[rs as usize]);
-            let result = mul.wrapping_add(cpu.regs[rn as usize]);
+            let mul = cpu.reg(rm).wrapping_mul(cpu.reg(rs));
+            let result = mul.wrapping_add(cpu.reg(rn));
             cpu.regs[rd as usize] = result;
             if s {
                 cpu.set_n((result >> 31) == 1);
@@ -189,7 +189,7 @@ pub fn execute_instr(
             rs,
             ..
         } => {
-            let result = (cpu.regs[rm as usize] as u64).wrapping_mul(cpu.regs[rs as usize] as u64);
+            let result = (cpu.reg(rm) as u64).wrapping_mul(cpu.reg(rs) as u64);
             cpu.regs[rd_lo as usize] = result as u32;
             cpu.regs[rd_hi as usize] = (result >> 32) as u32;
             if s {
@@ -205,9 +205,8 @@ pub fn execute_instr(
             rs,
             ..
         } => {
-            let mul = (cpu.regs[rm as usize] as u64).wrapping_mul(cpu.regs[rs as usize] as u64);
-            let accum =
-                (cpu.regs[rd_lo as usize] as u64) | ((cpu.regs[rd_hi as usize] as u64) << 32);
+            let mul = (cpu.reg(rm) as u64).wrapping_mul(cpu.reg(rs) as u64);
+            let accum = (cpu.reg(rd_lo) as u64) | ((cpu.reg(rd_hi) as u64) << 32);
             let result = mul.wrapping_add(accum);
             cpu.regs[rd_lo as usize] = result as u32;
             cpu.regs[rd_hi as usize] = (result >> 32) as u32;
@@ -224,8 +223,7 @@ pub fn execute_instr(
             rs,
             ..
         } => {
-            let result = (cpu.regs[rm as usize] as i32 as i64)
-                .wrapping_mul(cpu.regs[rs as usize] as i32 as i64) as u64;
+            let result = (cpu.reg(rm) as i32 as i64).wrapping_mul(cpu.reg(rs) as i32 as i64) as u64;
             cpu.regs[rd_lo as usize] = result as u32;
             cpu.regs[rd_hi as usize] = (result >> 32) as u32;
             if s {
@@ -241,10 +239,8 @@ pub fn execute_instr(
             rs,
             ..
         } => {
-            let mul = (cpu.regs[rm as usize] as i32 as i64)
-                .wrapping_mul(cpu.regs[rs as usize] as i32 as i64) as u64;
-            let accum =
-                (cpu.regs[rd_lo as usize] as u64) | ((cpu.regs[rd_hi as usize] as u64) << 32);
+            let mul = (cpu.reg(rm) as i32 as i64).wrapping_mul(cpu.reg(rs) as i32 as i64) as u64;
+            let accum = (cpu.reg(rd_lo) as u64) | ((cpu.reg(rd_hi) as u64) << 32);
             let result = mul.wrapping_add(accum);
             cpu.regs[rd_lo as usize] = result as u32;
             cpu.regs[rd_hi as usize] = (result >> 32) as u32;
@@ -263,14 +259,14 @@ pub fn execute_instr(
             rd, rn, lsb, width, ..
         } => {
             let mask = ((1u64.wrapping_shl(width)).wrapping_sub(1) as u32).wrapping_shl(lsb);
-            let val = (cpu.regs[rn as usize] & ((1u64.wrapping_shl(width)).wrapping_sub(1) as u32))
+            let val = (cpu.reg(rn) & ((1u64.wrapping_shl(width)).wrapping_sub(1) as u32))
                 .wrapping_shl(lsb);
-            cpu.regs[rd as usize] = (cpu.regs[rd as usize] & !mask) | val;
+            cpu.regs[rd as usize] = (cpu.reg(rd) & !mask) | val;
         }
         Instr::Ubfx {
             rd, rn, lsb, width, ..
         } => {
-            let val = (cpu.regs[rn as usize].wrapping_shr(lsb))
+            let val = (cpu.reg(rn).wrapping_shr(lsb))
                 & ((1u64.wrapping_shl(width)).wrapping_sub(1) as u32);
             cpu.regs[rd as usize] = val;
         }
@@ -278,32 +274,31 @@ pub fn execute_instr(
             rd, rn, lsb, width, ..
         } => {
             let shift_up = 32 - lsb - width;
-            let val =
-                ((cpu.regs[rn as usize] as i32).wrapping_shl(shift_up)).wrapping_shr(32 - width);
-            cpu.regs[rd as usize] = val as u32;
+            let val = ((cpu.reg(rn) as i32).wrapping_shl(shift_up)).wrapping_shr(32 - width);
+            cpu.regs[rd as usize] = val.cast_unsigned();
         }
         Instr::Rev { rd, rm, .. } => {
-            cpu.regs[rd as usize] = cpu.regs[rm as usize].swap_bytes();
+            cpu.regs[rd as usize] = cpu.reg(rm).swap_bytes();
         }
         Instr::Rev16 { rd, rm, .. } => {
-            let val = cpu.regs[rm as usize];
+            let val = cpu.reg(rm);
             cpu.regs[rd as usize] = ((val & 0xFF) << 8)
                 | ((val & 0xFF00) >> 8)
                 | ((val & 0xFF0000) << 8)
                 | ((val & 0xFF000000) >> 8);
         }
         Instr::Revsh { rd, rm, .. } => {
-            let val = cpu.regs[rm as usize];
+            let val = cpu.reg(rm);
             let half = ((val & 0xFF) << 8) | ((val & 0xFF00) >> 8);
-            cpu.regs[rd as usize] = half as i16 as i32 as u32;
+            cpu.regs[rd as usize] = (half as i16 as i32).cast_unsigned();
         }
         Instr::Sxtb {
             rd, rm, rot, rn, ..
         } => {
-            let rotated = cpu.regs[rm as usize].rotate_right((rot * 8) as u32);
-            let val = rotated as i8 as i32 as u32;
+            let rotated = cpu.reg(rm).rotate_right((rot * 8) as u32);
+            let val = (rotated as i8 as i32).cast_unsigned();
             cpu.regs[rd as usize] = if let Some(n) = rn {
-                cpu.regs[n as usize].wrapping_add(val)
+                cpu.reg(n).wrapping_add(val)
             } else {
                 val
             };
@@ -311,10 +306,10 @@ pub fn execute_instr(
         Instr::Sxth {
             rd, rm, rot, rn, ..
         } => {
-            let rotated = cpu.regs[rm as usize].rotate_right((rot * 8) as u32);
-            let val = rotated as i16 as i32 as u32;
+            let rotated = cpu.reg(rm).rotate_right((rot * 8) as u32);
+            let val = (rotated as i16 as i32).cast_unsigned();
             cpu.regs[rd as usize] = if let Some(n) = rn {
-                cpu.regs[n as usize].wrapping_add(val)
+                cpu.reg(n).wrapping_add(val)
             } else {
                 val
             };
@@ -322,10 +317,10 @@ pub fn execute_instr(
         Instr::Uxtb {
             rd, rm, rot, rn, ..
         } => {
-            let rotated = cpu.regs[rm as usize].rotate_right((rot * 8) as u32);
+            let rotated = cpu.reg(rm).rotate_right((rot * 8) as u32);
             let val = rotated & 0xFF;
             cpu.regs[rd as usize] = if let Some(n) = rn {
-                cpu.regs[n as usize].wrapping_add(val)
+                cpu.reg(n).wrapping_add(val)
             } else {
                 val
             };
@@ -333,16 +328,16 @@ pub fn execute_instr(
         Instr::Uxth {
             rd, rm, rot, rn, ..
         } => {
-            let rotated = cpu.regs[rm as usize].rotate_right((rot * 8) as u32);
+            let rotated = cpu.reg(rm).rotate_right((rot * 8) as u32);
             let val = rotated & 0xFFFF;
             cpu.regs[rd as usize] = if let Some(n) = rn {
-                cpu.regs[n as usize].wrapping_add(val)
+                cpu.reg(n).wrapping_add(val)
             } else {
                 val
             };
         }
         Instr::Clz { rd, rm, .. } => {
-            cpu.regs[rd as usize] = cpu.regs[rm as usize].leading_zeros();
+            cpu.regs[rd as usize] = cpu.reg(rm).leading_zeros();
         }
 
         // Memory (Single)
@@ -355,7 +350,7 @@ pub fn execute_instr(
             up,
             ..
         } => {
-            let mut addr = cpu.regs[rn as usize];
+            let mut addr = cpu.reg(rn);
             let (off_val, _) = evaluate_operand2(cpu, offset);
 
             if pre {
@@ -365,7 +360,7 @@ pub fn execute_instr(
                     addr.wrapping_sub(off_val)
                 };
             }
-            cpu.regs[rd as usize] = bus.read_32(addr as u64)?;
+            cpu.regs[rd as usize] = cpu.read_data_32(bus, addr)?;
             if writeback || !pre {
                 let final_addr = if !pre {
                     if up {
@@ -390,14 +385,9 @@ pub fn execute_instr(
             up,
             ..
         } => {
-            let mut addr = cpu.regs[rn as usize];
+            let mut addr = cpu.reg(rn);
             let (off_val, _) = evaluate_operand2(cpu, offset);
-
-            let val = if rd as usize == REG_PC {
-                cpu.regs[REG_PC].wrapping_add(4)
-            } else {
-                cpu.regs[rd as usize]
-            };
+            let val = cpu.reg(rd);
 
             if pre {
                 addr = if up {
@@ -406,7 +396,7 @@ pub fn execute_instr(
                     addr.wrapping_sub(off_val)
                 };
             }
-            bus.write_32(addr as u64, val)?;
+            cpu.write_data_32(bus, addr, val)?;
 
             if writeback || !pre {
                 let final_addr = if !pre {
@@ -432,7 +422,7 @@ pub fn execute_instr(
             up,
             ..
         } => {
-            let mut addr = cpu.regs[rn as usize];
+            let mut addr = cpu.reg(rn);
             let (off_val, _) = evaluate_operand2(cpu, offset);
 
             if pre {
@@ -442,7 +432,7 @@ pub fn execute_instr(
                     addr.wrapping_sub(off_val)
                 };
             }
-            cpu.regs[rd as usize] = bus.read_8(addr as u64)? as u32;
+            cpu.regs[rd as usize] = cpu.read_data_8(bus, addr)? as u32;
             if writeback || !pre {
                 let final_addr = if !pre {
                     if up {
@@ -467,8 +457,9 @@ pub fn execute_instr(
             up,
             ..
         } => {
-            let mut addr = cpu.regs[rn as usize];
+            let mut addr = cpu.reg(rn);
             let (off_val, _) = evaluate_operand2(cpu, offset);
+            let val = cpu.reg(rd);
 
             if pre {
                 addr = if up {
@@ -477,7 +468,8 @@ pub fn execute_instr(
                     addr.wrapping_sub(off_val)
                 };
             }
-            bus.write_8(addr as u64, (cpu.regs[rd as usize] & 0xFF) as u8)?;
+            cpu.write_data_8(bus, addr, (val & 0xFF) as u8)?;
+
             if writeback || !pre {
                 let final_addr = if !pre {
                     if up {
@@ -502,7 +494,7 @@ pub fn execute_instr(
             up,
             ..
         } => {
-            let mut addr = cpu.regs[rn as usize];
+            let mut addr = cpu.reg(rn);
             let (off_val, _) = evaluate_operand2(cpu, offset);
 
             if pre {
@@ -512,7 +504,7 @@ pub fn execute_instr(
                     addr.wrapping_sub(off_val)
                 };
             }
-            cpu.regs[rd as usize] = bus.read_16(addr as u64)? as u32;
+            cpu.regs[rd as usize] = cpu.read_data_16(bus, addr)? as u32;
             if writeback || !pre {
                 let final_addr = if !pre {
                     if up {
@@ -537,8 +529,9 @@ pub fn execute_instr(
             up,
             ..
         } => {
-            let mut addr = cpu.regs[rn as usize];
+            let mut addr = cpu.reg(rn);
             let (off_val, _) = evaluate_operand2(cpu, offset);
+            let val = cpu.reg(rd);
 
             if pre {
                 addr = if up {
@@ -547,7 +540,7 @@ pub fn execute_instr(
                     addr.wrapping_sub(off_val)
                 };
             }
-            bus.write_16(addr as u64, (cpu.regs[rd as usize] & 0xFFFF) as u16)?;
+            cpu.write_data_16(bus, addr, (val & 0xFFFF) as u16)?;
             if writeback || !pre {
                 let final_addr = if !pre {
                     if up {
@@ -572,7 +565,7 @@ pub fn execute_instr(
             up,
             ..
         } => {
-            let mut addr = cpu.regs[rn as usize];
+            let mut addr = cpu.reg(rn);
             let (off_val, _) = evaluate_operand2(cpu, offset);
 
             if pre {
@@ -582,7 +575,7 @@ pub fn execute_instr(
                     addr.wrapping_sub(off_val)
                 };
             }
-            let val = bus.read_8(addr as u64)? as i8 as i32 as u32;
+            let val = (cpu.read_data_8(bus, addr)? as i8 as i32).cast_unsigned();
             cpu.regs[rd as usize] = val;
             if writeback || !pre {
                 let final_addr = if !pre {
@@ -608,7 +601,7 @@ pub fn execute_instr(
             up,
             ..
         } => {
-            let mut addr = cpu.regs[rn as usize];
+            let mut addr = cpu.reg(rn);
             let (off_val, _) = evaluate_operand2(cpu, offset);
 
             if pre {
@@ -618,7 +611,7 @@ pub fn execute_instr(
                     addr.wrapping_sub(off_val)
                 };
             }
-            let val = bus.read_16(addr as u64)? as i16 as i32 as u32;
+            let val = (cpu.read_data_16(bus, addr)? as i16 as i32).cast_unsigned();
             cpu.regs[rd as usize] = val;
             if writeback || !pre {
                 let final_addr = if !pre {
@@ -645,7 +638,7 @@ pub fn execute_instr(
             w,
             ..
         } => {
-            let mut addr = cpu.regs[rn as usize];
+            let mut addr = cpu.reg(rn);
             let ones = reg_list.count_ones();
             let total_bytes = ones * 4;
 
@@ -656,7 +649,7 @@ pub fn execute_instr(
 
             for i in 0..16 {
                 if (reg_list & (1 << i)) != 0 {
-                    cpu.regs[i] = bus.read_32(current_addr as u64)?;
+                    cpu.regs[i] = cpu.read_data_32(bus, current_addr)?;
                     current_addr += 4;
                 }
             }
@@ -677,7 +670,7 @@ pub fn execute_instr(
             w,
             ..
         } => {
-            let mut addr = cpu.regs[rn as usize];
+            let mut addr = cpu.reg(rn);
             let ones = reg_list.count_ones();
             let total_bytes = ones * 4;
 
@@ -688,12 +681,8 @@ pub fn execute_instr(
 
             for i in 0..16 {
                 if (reg_list & (1 << i)) != 0 {
-                    let val = if i == REG_PC {
-                        cpu.regs[REG_PC].wrapping_add(4)
-                    } else {
-                        cpu.regs[i]
-                    };
-                    bus.write_32(current_addr as u64, val)?;
+                    let val = cpu.reg(i as u8);
+                    cpu.write_data_32(bus, current_addr, val)?;
                     current_addr += 4;
                 }
             }
@@ -710,23 +699,21 @@ pub fn execute_instr(
         // Branching
         Instr::B { target, .. } => {
             let pc_base = cpu.regs[REG_PC].wrapping_add(4);
-            cpu.regs[REG_PC] = (pc_base as i32).wrapping_add(target) as u32;
+            cpu.regs[REG_PC] = (pc_base as i32).wrapping_add(target).cast_unsigned();
         }
         Instr::Bl { target, .. } => {
             cpu.regs[REG_LR] = cpu.regs[REG_PC];
-
             let pc_base = cpu.regs[REG_PC].wrapping_add(4);
-            cpu.regs[REG_PC] = (pc_base as i32).wrapping_add(target) as u32;
+            cpu.regs[REG_PC] = (pc_base as i32).wrapping_add(target).cast_unsigned();
         }
         Instr::Bx { rm, .. } => {
-            let val = cpu.regs[rm as usize];
+            let val = cpu.reg(rm);
             cpu.set_t((val & 1) == 1);
             cpu.regs[REG_PC] = val & !1;
         }
         Instr::Blx { rm, .. } => {
             cpu.regs[REG_LR] = cpu.regs[REG_PC];
-
-            let val = cpu.regs[rm as usize];
+            let val = cpu.reg(rm);
             cpu.set_t((val & 1) == 1);
             cpu.regs[REG_PC] = val & !1;
         }
@@ -918,10 +905,10 @@ fn evaluate_operand2(cpu: &Armv7Cpu, op2: Operand2) -> (u32, bool) {
     match op2 {
         Operand2::Immediate { val, carry_out } => (val, carry_out.unwrap_or_else(|| cpu.get_c())),
         Operand2::Register { rm, shift } => {
-            let val = cpu.regs[rm as usize];
+            let val = cpu.reg(rm);
             let (shift_type, amount) = match shift {
                 Shift::Immediate { shift_type, amount } => (shift_type, amount),
-                Shift::Register { shift_type, rs } => (shift_type, cpu.regs[rs as usize] & 0xFF),
+                Shift::Register { shift_type, rs } => (shift_type, cpu.reg(rs) & 0xFF),
             };
 
             if amount == 0 {
@@ -968,7 +955,7 @@ fn evaluate_operand2(cpu: &Armv7Cpu, op2: Operand2) -> (u32, bool) {
                         (if bit31 { 0xFFFFFFFF } else { 0 }, bit31)
                     } else {
                         (
-                            ((val as i32) >> amount) as u32,
+                            ((val as i32) >> amount).cast_unsigned(),
                             ((val >> (amount - 1)) & 1) == 1,
                         )
                     }

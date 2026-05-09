@@ -49,6 +49,12 @@ pub struct HookRegistry {
     pub interrupt_hooks: Vec<Box<dyn InterruptHook>>,
 }
 
+impl Default for HookRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HookRegistry {
     pub const fn new() -> Self {
         Self {

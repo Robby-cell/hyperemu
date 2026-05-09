@@ -8,7 +8,7 @@ description = "A multi-architecture hardware emulator"
 default = ["full"]
 full = ["elf", "armv7", "gdb"]
 elf = ["dep:goblin"]
-gdb = ["dep:gdbstub"]
+gdb = ["dep:gdbstub", "dep:gdbstub_arch"]
 armv7 = []
 
 [dependencies]
@@ -17,3 +17,4 @@ thiserror = "2.0"
 log = "0.4"
 goblin = { version = "0.10", optional = true }
 gdbstub = { version = "0.7", optional = true }
+gdbstub_arch = { version = "0.3", optional = true }

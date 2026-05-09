@@ -98,6 +98,12 @@ pub struct MemoryBus {
     last_region_idx: usize,
 }
 
+impl Default for MemoryBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryBus {
     pub const fn new() -> Self {
         Self {
@@ -121,10 +127,11 @@ impl MemoryBus {
     #[inline(always)]
     pub fn resolve_mut(&mut self, addr: u64) -> Result<(&mut BusDevice, u64), EmuError> {
         // TLB Fast-Path (Hits 99% of the time for sequential execution)
-        if let Some(&MemoryRegion { start, size, .. }) = self.regions.get(self.last_region_idx) {
-            if addr >= start && addr < start + size {
-                return Ok((&mut self.regions[self.last_region_idx].device, addr - start));
-            }
+        if let Some(&MemoryRegion { start, size, .. }) = self.regions.get(self.last_region_idx)
+            && addr >= start
+            && addr < start + size
+        {
+            return Ok((&mut self.regions[self.last_region_idx].device, addr - start));
         }
 
         // Fallback to Binary Search

@@ -201,6 +201,17 @@ impl Armv7Cpu {
         // Jump to exception vector
         self.regs[REG_PC] = target_pc;
     }
+
+    /// ARM Architectural Rule: Reading R15 (PC) evaluates to Instruction Address + 8.
+    /// Because self.regs[15] is already incremented by 4 during fetch, we add another 4 here.
+    #[inline(always)]
+    pub fn reg(&self, r: u8) -> u32 {
+        if r == 15 {
+            self.regs[15].wrapping_add(4)
+        } else {
+            self.regs[r as usize]
+        }
+    }
 }
 
 impl Armv7Cpu {
@@ -210,11 +221,11 @@ impl Armv7Cpu {
         let pc = self.regs[REG_PC];
         // We ask the bus for a direct reference to the underlying RAM
         // If it's a BusDevice::Ram, we get the slice. If it's Custom, we fail fast.
-        let (device, _offset) = bus.resolve_mut(pc as u64)?;
+        let (device, offset) = bus.resolve_mut(pc as u64)?;
 
         if let crate::bus::BusDevice::Ram(ram) = device {
             self.fetch_slice = ram.data.as_ptr();
-            self.fetch_base = pc;
+            self.fetch_base = (pc as u64 - offset) as _;
             self.fetch_len = ram.data.len() as u32;
             Ok(())
         } else {
@@ -222,6 +233,61 @@ impl Armv7Cpu {
                 "Cannot execute from non-RAM device".into(),
             ))
         }
+    }
+}
+
+impl Armv7Cpu {
+    // ENDIAN-AWARE DATA HELPERS
+
+    #[inline(always)]
+    pub fn read_data_32(&self, bus: &mut MemoryBus, addr: u32) -> Result<u32, EmuError> {
+        let val = bus.read_32(addr as u64)?;
+        // If the CPU is in Big-Endian mode, swap the bytes
+        Ok(if self.get_e() { val.swap_bytes() } else { val })
+    }
+
+    #[inline(always)]
+    pub fn write_data_32(
+        &mut self,
+        bus: &mut MemoryBus,
+        addr: u32,
+        val: u32,
+    ) -> Result<(), EmuError> {
+        let val = if self.get_e() { val.swap_bytes() } else { val };
+        bus.write_32(addr as u64, val)
+    }
+
+    #[inline(always)]
+    pub fn read_data_16(&self, bus: &mut MemoryBus, addr: u32) -> Result<u16, EmuError> {
+        let val = bus.read_16(addr as u64)?;
+        Ok(if self.get_e() { val.swap_bytes() } else { val })
+    }
+
+    #[inline(always)]
+    pub fn write_data_16(
+        &mut self,
+        bus: &mut MemoryBus,
+        addr: u32,
+        val: u16,
+    ) -> Result<(), EmuError> {
+        let val = if self.get_e() { val.swap_bytes() } else { val };
+        bus.write_16(addr as u64, val)
+    }
+
+    #[inline(always)]
+    pub fn read_data_8(&self, bus: &mut MemoryBus, addr: u32) -> Result<u8, EmuError> {
+        let val = bus.read_8(addr as u64)?;
+        Ok(val)
+    }
+
+    #[inline(always)]
+    pub fn write_data_8(
+        &mut self,
+        bus: &mut MemoryBus,
+        addr: u32,
+        val: u8,
+    ) -> Result<(), EmuError> {
+        bus.write_8(addr as u64, val)
     }
 }
 
@@ -278,12 +344,8 @@ impl Armv7Cpu {
         let raw_instr = unsafe {
             let offset = (pc_val - self.fetch_base) as usize;
             let ptr = self.fetch_slice.add(offset) as *const u32;
-            ptr.read_unaligned()
+            u32::from_le(ptr.read_unaligned())
         };
-
-        if options.run_code_hooks {
-            hooks.trigger_code(self, bus, pc_val as u64)?;
-        }
 
         let next_pc = pc_val.wrapping_add(4);
         self.regs[REG_PC] = next_pc;
@@ -351,7 +413,7 @@ impl Cpu for Armv7Cpu {
                     break;
                 }
 
-                branched = self.execute_one_extended(bus, hooks, &options)?;
+                branched = self.execute_one_extended(bus, hooks, options)?;
                 total_executed += 1;
 
                 if branched {
