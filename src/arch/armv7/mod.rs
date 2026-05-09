@@ -270,8 +270,8 @@ impl Armv7Cpu {
             self.refresh_fetch_ptr(bus)?;
         }
 
-        // Option: Conditionally skip code hooks for pure JIT speed!
-        if options.run_code_hooks && !hooks.code_hooks.is_empty() {
+        // Conditionally skip code hooks
+        if options.run_code_hooks {
             hooks.trigger_code(self, bus, pc_val as u64)?;
         }
 
@@ -345,7 +345,7 @@ impl Cpu for Armv7Cpu {
             let mut branched = false;
 
             // INNER HOT LOOP: Hardcoded to 16.
-            // LLVM will completely unroll this into 16 sequential executions!
+            // LLVM will completely unroll this into 16 sequential executions
             for _ in 0..16 {
                 if total_executed >= max_instrs {
                     break;
