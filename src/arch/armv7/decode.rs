@@ -36,8 +36,8 @@ pub fn decode_arm(raw: u32) -> Instr {
 fn decode_media(cond: Condition, raw: u32) -> Instr {
     // BFC / BFI
     if (raw & 0x0FF000F0) == 0x07C00010 {
-        let rd = ((raw >> 12) & 0xF) as usize;
-        let rn = (raw & 0xF) as usize;
+        let rd = ((raw >> 12) & 0xF) as u8;
+        let rn = (raw & 0xF) as u8;
         let lsb = (raw >> 7) & 0x1F;
         let msb = (raw >> 16) & 0x1F;
         let width = msb.saturating_sub(lsb) + 1;
@@ -61,8 +61,8 @@ fn decode_media(cond: Condition, raw: u32) -> Instr {
 
     // UBFX / SBFX
     if (raw & 0x0FA00070) == 0x07A00050 {
-        let rd = ((raw >> 12) & 0xF) as usize;
-        let rn = (raw & 0xF) as usize;
+        let rd = ((raw >> 12) & 0xF) as u8;
+        let rn = (raw & 0xF) as u8;
         let lsb = (raw >> 7) & 0x1F;
         let widthm1 = (raw >> 16) & 0x1F;
         let width = widthm1 + 1;
@@ -89,31 +89,31 @@ fn decode_media(cond: Condition, raw: u32) -> Instr {
     if (raw & 0x0FF00FF0) == 0x06B00F30 {
         return Instr::Rev {
             cond,
-            rd: ((raw >> 12) & 0xF) as usize,
-            rm: (raw & 0xF) as usize,
+            rd: ((raw >> 12) & 0xF) as u8,
+            rm: (raw & 0xF) as u8,
         };
     }
     if (raw & 0x0FF00FF0) == 0x06B00FB0 {
         return Instr::Rev16 {
             cond,
-            rd: ((raw >> 12) & 0xF) as usize,
-            rm: (raw & 0xF) as usize,
+            rd: ((raw >> 12) & 0xF) as u8,
+            rm: (raw & 0xF) as u8,
         };
     }
     if (raw & 0x0FF00FF0) == 0x06F00FB0 {
         return Instr::Revsh {
             cond,
-            rd: ((raw >> 12) & 0xF) as usize,
-            rm: (raw & 0xF) as usize,
+            rd: ((raw >> 12) & 0xF) as u8,
+            rm: (raw & 0xF) as u8,
         };
     }
 
     // Sign/Zero Extensions
     let ext_op = (raw >> 20) & 0xFF;
     if ext_op == 0x6A || ext_op == 0x6B || ext_op == 0x6E || ext_op == 0x6F {
-        let rd = ((raw >> 12) & 0xF) as usize;
-        let rm = (raw & 0xF) as usize;
-        let rn = ((raw >> 16) & 0xF) as usize;
+        let rd = ((raw >> 12) & 0xF) as u8;
+        let rm = (raw & 0xF) as u8;
+        let rn = ((raw >> 16) & 0xF) as u8;
         let rot = ((raw >> 10) & 0x3) as u8;
         let rn_opt = if rn == 15 { None } else { Some(rn) };
 
@@ -164,15 +164,15 @@ fn decode_media(cond: Condition, raw: u32) -> Instr {
 fn decode_data_proc_or_misc(cond: Condition, raw: u32, is_immediate_op2: bool) -> Instr {
     let opcode = (raw >> 21) & 0xF;
     let s = (raw >> 20) & 1 == 1;
-    let rn = ((raw >> 16) & 0xF) as usize;
-    let rd = ((raw >> 12) & 0xF) as usize;
+    let rn = ((raw >> 16) & 0xF) as u8;
+    let rd = ((raw >> 12) & 0xF) as u8;
 
     // Count Leading Zeros
     if (raw & 0x0FFF0FF0) == 0x016F0F10 {
         return Instr::Clz {
             cond,
-            rd: ((raw >> 12) & 0xF) as usize,
-            rm: (raw & 0xF) as usize,
+            rd: ((raw >> 12) & 0xF) as u8,
+            rm: (raw & 0xF) as u8,
         };
     }
 
@@ -186,22 +186,22 @@ fn decode_data_proc_or_misc(cond: Condition, raw: u32, is_immediate_op2: bool) -
         if (raw & 0x0FFFFFF0) == 0x012FFF10 {
             return Instr::Bx {
                 cond,
-                rm: (raw & 0xF) as usize,
+                rm: (raw & 0xF) as u8,
             };
         }
         if (raw & 0x0FFFFFF0) == 0x012FFF30 {
             return Instr::Blx {
                 cond,
-                rm: (raw & 0xF) as usize,
+                rm: (raw & 0xF) as u8,
             };
         }
     }
 
     if !is_immediate_op2 && ((raw & 0x00000090) == 0x00000090) {
-        let rm = (raw & 0xF) as usize;
-        let rs = ((raw >> 8) & 0xF) as usize;
-        let rn_ext = ((raw >> 12) & 0xF) as usize;
-        let rd_ext = ((raw >> 16) & 0xF) as usize;
+        let rm = (raw & 0xF) as u8;
+        let rs = ((raw >> 8) & 0xF) as u8;
+        let rn_ext = ((raw >> 12) & 0xF) as u8;
+        let rd_ext = ((raw >> 16) & 0xF) as u8;
 
         // 32-bit Multiplies
         if (raw & 0x0F800000) == 0x00000000 {
@@ -360,7 +360,7 @@ fn decode_data_proc_or_misc(cond: Condition, raw: u32, is_immediate_op2: bool) -
     if !is_immediate_op2 && (raw & 0x0FB00FF0) == 0x01200000 {
         let use_spsr = (raw >> 22) & 1 == 1;
         let mask = ((raw >> 16) & 0xF) as u8;
-        let rm = (raw & 0xF) as usize;
+        let rm = (raw & 0xF) as u8;
         let op2 = Operand2::Register {
             rm,
             shift: Shift::Immediate {
@@ -403,7 +403,7 @@ fn decode_data_proc_or_misc(cond: Condition, raw: u32, is_immediate_op2: bool) -
         };
         Operand2::Immediate { val, carry_out }
     } else {
-        let rm = (raw & 0xF) as usize;
+        let rm = (raw & 0xF) as u8;
         let shift_type = match (raw >> 5) & 0x3 {
             0 => ShiftType::Lsl,
             1 => ShiftType::Lsr,
@@ -415,7 +415,7 @@ fn decode_data_proc_or_misc(cond: Condition, raw: u32, is_immediate_op2: bool) -
         let shift = if r_bit == 1 {
             Shift::Register {
                 shift_type,
-                rs: ((raw >> 8) & 0xF) as usize,
+                rs: ((raw >> 8) & 0xF) as u8,
             }
         } else {
             Shift::Immediate {
@@ -513,8 +513,8 @@ fn decode_load_store(cond: Condition, raw: u32, is_shifted_reg: bool) -> Instr {
     let b = (raw >> 22) & 1 == 1;
     let w = (raw >> 21) & 1 == 1;
     let l = (raw >> 20) & 1 == 1;
-    let rn = ((raw >> 16) & 0xF) as usize;
-    let rd = ((raw >> 12) & 0xF) as usize;
+    let rn = ((raw >> 16) & 0xF) as u8;
+    let rd = ((raw >> 12) & 0xF) as u8;
 
     let offset = if !is_shifted_reg {
         Operand2::Immediate {
@@ -522,7 +522,7 @@ fn decode_load_store(cond: Condition, raw: u32, is_shifted_reg: bool) -> Instr {
             carry_out: None,
         }
     } else {
-        let rm = (raw & 0xF) as usize;
+        let rm = (raw & 0xF) as u8;
         let shift_type = match (raw >> 5) & 0x3 {
             0 => ShiftType::Lsl,
             1 => ShiftType::Lsr,
@@ -589,7 +589,7 @@ fn decode_load_store_multiple(cond: Condition, raw: u32) -> Instr {
     let u = (raw >> 23) & 1 == 1;
     let w = (raw >> 21) & 1 == 1;
     let l = (raw >> 20) & 1 == 1;
-    let rn = ((raw >> 16) & 0xF) as usize;
+    let rn = ((raw >> 16) & 0xF) as u8;
     let reg_list = (raw & 0xFFFF) as u16;
 
     if l {
