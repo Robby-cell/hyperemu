@@ -14,10 +14,32 @@ impl Stm32Gpio {
         Self { registers: pins }
     }
 
+    pub const fn is_odr_pin_high(&self, pin: u8) -> bool {
+        (self.registers[5] & (1 << pin)) != (1 << pin)
+    }
+
+    pub const fn is_moder_pin_high(&self, pin: u8) -> bool {
+        (self.registers[0] & (1 << pin)) != (1 << pin)
+    }
+
     pub const fn is_led_on(&self) -> bool {
-        // ODR (offset 0x14 / index 5) bit 5 must be 1 (0x20)
         // MODER (offset 0x00 / index 0) bit 10 must be 1 (0x400)
-        self.registers[5] & 0x20 == 0x20 && self.registers[0] & 0x400 == 0x400
+        // ODR (offset 0x14 / index 5) bit 5 must be 1 (0x20)
+        // self.registers[5] & 0x20 == 0x20 && self.registers[0] & 0x400 == 0x400
+        self.is_moder_pin_high(10) && self.is_odr_pin_high(5)
+    }
+
+    pub const fn set_idr_pin(&mut self, pin: u8, is_high: bool) {
+        // IDR is offset 0x10, which is index 4 in your array
+        if is_high {
+            self.registers[4] |= 1 << pin;
+        } else {
+            self.registers[4] &= !(1 << pin);
+        }
+    }
+
+    pub const fn is_idr_pin_high(&self, pin: u8) -> bool {
+        (self.registers[4] & (1 << pin)) != (1 << pin)
     }
 }
 
