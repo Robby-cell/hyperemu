@@ -1,4 +1,9 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+
 use crate::device::Device;
+use crate::device::ram::Ram;
 use crate::error::EmuError;
 
 bitflags::bitflags! {
@@ -13,25 +18,51 @@ bitflags::bitflags! {
 }
 
 pub enum BusDevice {
-    Ram(crate::device::ram::Ram),
+    Ram(Ram),
+
+    /// Exclusively owned dynamic device (Fastest dynamic dispatch)
     Dynamic(Box<dyn Device>),
+
+    /// Shared device for Single-Threaded GUIs and WebAssembly
+    SharedRc(Rc<RefCell<dyn Device>>),
+
+    /// Shared device for Multi-Threaded GUIs
+    SharedArc(Arc<Mutex<dyn Device + Send>>),
 }
 
+impl From<Ram> for BusDevice {
+    fn from(val: Ram) -> Self {
+        BusDevice::Ram(val)
+    }
+}
+impl<D: Device + 'static> From<Box<D>> for BusDevice {
+    fn from(val: Box<D>) -> Self {
+        BusDevice::Dynamic(val)
+    }
+}
 impl From<Box<dyn Device>> for BusDevice {
-    fn from(value: Box<dyn Device>) -> Self {
-        Self::Dynamic(value)
+    fn from(val: Box<dyn Device>) -> Self {
+        BusDevice::Dynamic(val)
     }
 }
-
-impl<T: Device + 'static> From<Box<T>> for BusDevice {
-    fn from(value: Box<T>) -> Self {
-        Self::Dynamic(value)
+impl<D: Device + 'static> From<Rc<RefCell<D>>> for BusDevice {
+    fn from(val: Rc<RefCell<D>>) -> Self {
+        BusDevice::SharedRc(val)
     }
 }
-
-impl From<crate::device::ram::Ram> for BusDevice {
-    fn from(value: crate::device::ram::Ram) -> Self {
-        Self::Ram(value)
+impl From<Rc<RefCell<dyn Device>>> for BusDevice {
+    fn from(val: Rc<RefCell<dyn Device>>) -> Self {
+        BusDevice::SharedRc(val)
+    }
+}
+impl<D: Device + Send + 'static> From<Arc<Mutex<D>>> for BusDevice {
+    fn from(val: Arc<Mutex<D>>) -> Self {
+        BusDevice::SharedArc(val)
+    }
+}
+impl From<Arc<Mutex<dyn Device + Send>>> for BusDevice {
+    fn from(val: Arc<Mutex<dyn Device + Send>>) -> Self {
+        BusDevice::SharedArc(val)
     }
 }
 
@@ -40,7 +71,9 @@ impl Device for BusDevice {
     fn read_8(&mut self, offset: u64) -> Result<u8, EmuError> {
         match self {
             BusDevice::Ram(ram) => ram.read_8(offset),
-            BusDevice::Dynamic(device) => device.read_8(offset),
+            BusDevice::Dynamic(dev) => dev.read_8(offset),
+            BusDevice::SharedRc(dev) => dev.borrow_mut().read_8(offset),
+            BusDevice::SharedArc(dev) => dev.lock().unwrap().read_8(offset),
         }
     }
 
@@ -48,31 +81,20 @@ impl Device for BusDevice {
     fn write_8(&mut self, offset: u64, val: u8) -> Result<(), EmuError> {
         match self {
             BusDevice::Ram(ram) => ram.write_8(offset, val),
-            BusDevice::Dynamic(device) => device.write_8(offset, val),
+            BusDevice::Dynamic(dev) => dev.write_8(offset, val),
+            BusDevice::SharedRc(dev) => dev.borrow_mut().write_8(offset, val),
+            BusDevice::SharedArc(dev) => dev.lock().unwrap().write_8(offset, val),
         }
     }
 
-    #[inline(always)]
-    fn write_16(&mut self, offset: u64, val: u16) -> Result<(), EmuError> {
-        match self {
-            BusDevice::Ram(ram) => ram.write_16(offset, val),
-            BusDevice::Dynamic(device) => device.write_16(offset, val),
-        }
-    }
-
-    #[inline(always)]
-    fn read_16(&mut self, offset: u64) -> Result<u16, EmuError> {
-        match self {
-            BusDevice::Ram(ram) => ram.read_16(offset),
-            BusDevice::Dynamic(device) => device.read_16(offset),
-        }
-    }
-
+    // Repeat this pattern exactly for read_16, write_16, read_32, write_32...
     #[inline(always)]
     fn read_32(&mut self, offset: u64) -> Result<u32, EmuError> {
         match self {
             BusDevice::Ram(ram) => ram.read_32(offset),
-            BusDevice::Dynamic(device) => device.read_32(offset),
+            BusDevice::Dynamic(dev) => dev.read_32(offset),
+            BusDevice::SharedRc(dev) => dev.borrow_mut().read_32(offset),
+            BusDevice::SharedArc(dev) => dev.lock().unwrap().read_32(offset),
         }
     }
 
@@ -80,7 +102,9 @@ impl Device for BusDevice {
     fn write_32(&mut self, offset: u64, val: u32) -> Result<(), EmuError> {
         match self {
             BusDevice::Ram(ram) => ram.write_32(offset, val),
-            BusDevice::Dynamic(device) => device.write_32(offset, val),
+            BusDevice::Dynamic(dev) => dev.write_32(offset, val),
+            BusDevice::SharedRc(dev) => dev.borrow_mut().write_32(offset, val),
+            BusDevice::SharedArc(dev) => dev.lock().unwrap().write_32(offset, val),
         }
     }
 }
@@ -121,6 +145,11 @@ impl MemoryBus {
         });
         self.regions.sort_by_key(|r| r.start);
         self.last_region_idx = 0; // Reset cache on map
+    }
+
+    pub fn unmap(&mut self, start: u64) {
+        self.regions.retain(|r| r.start != start);
+        self.last_region_idx = 0; // Invalidate the TLB cache
     }
 
     /// Helper to find the correct device and translate absolute address to offset

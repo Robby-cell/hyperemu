@@ -1,5 +1,4 @@
 use super::Armv7Cpu;
-use super::decode::decode_arm;
 use super::execute::execute_instr;
 use super::instr::{Condition, Instr, Operand2, Shift, ShiftType};
 use crate::bus::{MemoryBus, Perms};
@@ -408,83 +407,85 @@ fn test_real_world_syscall_interception() {
 }
 
 #[test]
-fn test_gui_led_blinking() {
-    use crate::device::gpio::GpioPort;
-    use std::sync::{Arc, Mutex};
+fn test_gui_led_blinking_pull_model() {
+    use crate::bus::{BusDevice, Perms};
+    use crate::config::{Arch, CpuMode};
+    use crate::device::ram::Ram;
+    use crate::device::stm32_gpio::Stm32Gpio;
+    use crate::emu::HyperEmu;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
-    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+    let mut emu = HyperEmu::new(Arch::Armv7, CpuMode::MODE_32).unwrap();
 
-    // Create the shared GUI State
-    let gui_led_state = Arc::new(Mutex::new(0u8));
+    // Map the simplified GPIO device to memory address 0x4000_0000 (No Atomics/Arcs needed!)
+    let gpio_device = Rc::new(RefCell::new(Stm32Gpio::new()));
+    emu.mem_map(0x4000_0000, 0x1000, Perms::RW, gpio_device.clone().into());
 
-    // Map the GPIO device to memory address 0x4000_0000
-    // We pass a clone of the Arc to the device so both the CPU and the GUI own it.
-    let gpio_device = Box::new(GpioPort::new(Arc::clone(&gui_led_state)));
-    bus.map(0x4000_0000, 0x1000, Perms::RW, gpio_device.into());
+    // Map RAM for code
+    emu.mem_map(0x1000, 0x1000, Perms::RWX, BusDevice::Ram(Ram::new(0x1000)));
 
-    // Write an Assembly Program to blink the 1st LED (bit 0)
+    // Write STM32-accurate Assembly
     /*
         _start:
-            LDR r1, =0x40000000  ; Base address of GPIO
-            MOV r2, #1           ; LED ON (bit 0 = 1)
-            MOV r3, #0           ; LED OFF (bit 0 = 0)
+            MOV r1, #0x40000000    ; GPIO Base Address (simplified LDR)
+            MOV r2, #0x400         ; 0x400 sets MODER Pin 5 to Output
+            STR r2, [r1]           ; Write to MODER (Offset 0x00)
+
+            MOV r2, #0x20          ; 0x20 sets ODR Pin 5 High (ON)
+            MOV r3, #0             ; 0 sets ODR Pin 5 Low (OFF)
 
         _loop:
-            STRB r2, [r1]        ; Turn LED ON
-            STRB r3, [r1]        ; Turn LED OFF
-            B _loop              ; Repeat
+            STR r2,[r1, #0x14]    ; Turn LED ON (Offset 0x14 is ODR)
+            STR r3, [r1, #0x14]    ; Turn LED OFF
+            B _loop                ; Repeat
     */
-    let code: [u32; 6] = [
-        0xE3A01440, // MOV r1, #0x40000000 (Simplified LDR for testing: actually MOV r1, 0x40 rotated...)
-        0xE3A02001, // MOV r2, #1
-        0xE3A03000, // MOV r3, #0
-        0xE5C12000, // STRB r2, [r1]
-        0xE5C13000, // STRB r3, [r1]
-        0xEAFFFFFC, // B _loop (Branch back 2 instructions)
+    let code: [u32; 8] = [
+        0xE3A01440, // MOV r1, #0x40000000 (Base)
+        0xE3A02B01, // MOV r2, #0x400      (MODER Pin 5 Output)
+        0xE5812000, // STR r2, [r1]        (Write MODER)
+        0xE3A02020, // MOV r2, #0x20       (Pin 5 High)
+        0xE3A03000, // MOV r3, #0          (Pin 5 Low)
+        0xE5812014, // STR r2, [r1, #0x14] (Turn LED ON)
+        0xE5813014, // STR r3,[r1, #0x14] (Turn LED OFF)
+        0xEAFFFFFC, // B _loop
     ];
 
     for (i, &word) in code.iter().enumerate() {
-        bus.write_32(0x1000 + (i as u64 * 4), word).unwrap();
+        emu.bus.write_32(0x1000 + (i as u64 * 4), word).unwrap();
     }
-    cpu.regs[15] = 0x1000;
+    emu.reg_write(15, 0x1000).unwrap(); // Set PC
 
-    // Simulate a few clock cycles and watch the GUI state change
+    // GUI SIMULATION CLOSURE
+    // This mimics your UI thread asking the emulator for the hardware state before drawing a frame
+    let is_led_on = || -> bool {
+        // let moder = emu.bus.read_32(0x4000_0000).unwrap(); // Read MODER
+        // let odr = emu.bus.read_32(0x4000_0014).unwrap(); // Read ODR
 
-    // Setup instructions
-    let instr = bus.read_32(cpu.regs[15] as u64).unwrap();
-    execute_instr(&mut cpu, decode_arm(instr), &mut bus, &mut hooks).unwrap();
-    cpu.regs[15] += 4;
+        // let is_output = (moder & 0x400) == 0x400;
+        // let is_high = (odr & 0x20) == 0x20;
+        // is_output && is_high
+        gpio_device.borrow().is_led_on()
+    };
 
-    let instr = bus.read_32(cpu.regs[15] as u64).unwrap();
-    execute_instr(&mut cpu, decode_arm(instr), &mut bus, &mut hooks).unwrap();
-    cpu.regs[15] += 4;
+    // Run setup instructions (The 5 MOVs and MODER STR)
+    for _ in 0..5 {
+        emu.step().unwrap();
+    }
 
-    let instr = bus.read_32(cpu.regs[15] as u64).unwrap();
-    execute_instr(&mut cpu, decode_arm(instr), &mut bus, &mut hooks).unwrap();
-    cpu.regs[15] += 4;
+    // Execute STR r2,[r1, #0x14]
+    emu.step().unwrap();
 
-    // Execute STRB r2, [r1] (Turn LED ON)
-    let instr = bus.read_32(cpu.regs[15] as u64).unwrap();
-    execute_instr(&mut cpu, decode_arm(instr), &mut bus, &mut hooks).unwrap();
-    cpu.regs[15] += 4;
+    // GUI thread pulls the state!
+    assert_eq!(is_led_on(), true, "GUI pulled state and LED should be ON!");
 
-    // GUI thread checks the screen...
+    // Execute STR r3,[r1, #0x14]
+    emu.step().unwrap();
+
+    // GUI thread pulls the state!
     assert_eq!(
-        *gui_led_state.lock().unwrap(),
-        1,
-        "GUI should see LED turned ON!"
-    );
-
-    // Execute STRB r3, [r1] (Turn LED OFF)
-    let instr = bus.read_32(cpu.regs[15] as u64).unwrap();
-    execute_instr(&mut cpu, decode_arm(instr), &mut bus, &mut hooks).unwrap();
-    cpu.regs[15] += 4;
-    let _ = cpu.regs[15];
-
-    // GUI thread checks the screen...
-    assert_eq!(
-        *gui_led_state.lock().unwrap(),
-        0,
-        "GUI should see LED turned OFF!"
+        is_led_on(),
+        false,
+        "GUI pulled state and LED should be OFF!"
     );
 }

@@ -40,6 +40,10 @@ impl HyperEmu {
         self.bus.map(start, size, perms, device);
     }
 
+    pub fn mem_unmap(&mut self, start: u64) {
+        self.bus.unmap(start);
+    }
+
     pub fn reg_read(&self, reg_id: usize) -> Result<u64, EmuError> {
         self.cpu.read_reg(reg_id)
     }

@@ -1,5 +1,5 @@
-pub mod gpio;
 pub mod ram;
+pub mod stm32_gpio;
 pub mod uart;
 
 use crate::error::EmuError;
