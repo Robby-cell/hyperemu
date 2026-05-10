@@ -15,11 +15,11 @@ impl Stm32Gpio {
     }
 
     pub const fn is_odr_pin_high(&self, pin: u8) -> bool {
-        (self.registers[5] & (1 << pin)) != (1 << pin)
+        (self.registers[5] & (1 << pin)) == (1 << pin)
     }
 
     pub const fn is_moder_pin_high(&self, pin: u8) -> bool {
-        (self.registers[0] & (1 << pin)) != (1 << pin)
+        (self.registers[0] & (1 << pin)) == (1 << pin)
     }
 
     pub const fn is_led_on(&self) -> bool {
