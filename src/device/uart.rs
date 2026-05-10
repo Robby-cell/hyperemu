@@ -1,15 +1,15 @@
 use crate::device::Device;
 use crate::error::EmuError;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 
 /// A simple UART (Universal Asynchronous Receiver-Transmitter) for I/O.
 #[repr(transparent)]
-pub struct Uart(BufWriter<Box<dyn Write + Send>>);
+pub struct Uart(Box<dyn Write + Send>);
 
 impl Uart {
     /// Creates a UART using a custom writer (Files, Sockets, Channels, etc.)
     pub fn new<W: Write + Send + 'static>(writer: W) -> Self {
-        Self(BufWriter::new(Box::new(writer)))
+        Self(Box::new(writer))
     }
 
     /// Convenience constructor for writing directly to the host's terminal
