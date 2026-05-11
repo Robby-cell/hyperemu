@@ -118,6 +118,14 @@ pub fn execute_instr(
             }
         }
 
+        Instr::Movw { rd, imm16, .. } => {
+            cpu.regs[rd as usize] = imm16 as u32;
+        }
+        Instr::Movt { rd, imm16, .. } => {
+            let current = cpu.reg(rd);
+            cpu.regs[rd as usize] = (current & 0x0000FFFF) | ((imm16 as u32) << 16);
+        }
+
         // Status Register
         Instr::Mrs { rd, use_spsr, .. } => {
             let mode = cpu.current_mode();
@@ -763,6 +771,8 @@ fn instr_condition(instr: &Instr) -> Condition {
         | Instr::Mov { cond, .. }
         | Instr::Bic { cond, .. }
         | Instr::Mvn { cond, .. }
+        | Instr::Movw { cond, .. }
+        | Instr::Movt { cond, .. }
         | Instr::Mrs { cond, .. }
         | Instr::Msr { cond, .. }
         | Instr::Mul { cond, .. }

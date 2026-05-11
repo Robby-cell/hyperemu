@@ -168,6 +168,18 @@ pub enum Instr {
         op2: Operand2,
     },
 
+    // 16-bit Immediate Moves
+    Movw {
+        cond: Condition,
+        rd: u8,
+        imm16: u16,
+    },
+    Movt {
+        cond: Condition,
+        rd: u8,
+        imm16: u16,
+    },
+
     // Status Register Access
     Mrs {
         cond: Condition,

@@ -197,6 +197,23 @@ fn decode_data_proc_or_misc(cond: Condition, raw: u32, is_immediate_op2: bool) -
         }
     }
 
+    if is_immediate_op2 {
+        // MOVW (0x03000000 base)
+        if (raw & 0x0FF00000) == 0x03000000 {
+            let imm4 = (raw >> 16) & 0xF;
+            let imm12 = raw & 0xFFF;
+            let imm16 = ((imm4 << 12) | imm12) as u16;
+            return Instr::Movw { cond, rd, imm16 };
+        }
+        // MOVT (0x03400000 base)
+        if (raw & 0x0FF00000) == 0x03400000 {
+            let imm4 = (raw >> 16) & 0xF;
+            let imm12 = raw & 0xFFF;
+            let imm16 = ((imm4 << 12) | imm12) as u16;
+            return Instr::Movt { cond, rd, imm16 };
+        }
+    }
+
     if !is_immediate_op2 && ((raw & 0x00000090) == 0x00000090) {
         let rm = (raw & 0xF) as u8;
         let rs = ((raw >> 8) & 0xF) as u8;
