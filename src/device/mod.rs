@@ -6,6 +6,7 @@ use crate::error::EmuError;
 
 pub trait Device {
     fn read_8(&mut self, offset: u64) -> Result<u8, EmuError>;
+
     fn write_8(&mut self, offset: u64, val: u8) -> Result<(), EmuError>;
 
     // Default implementations using little-endian access
