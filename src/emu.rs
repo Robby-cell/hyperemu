@@ -57,7 +57,7 @@ impl HyperEmu {
         self.cpu.step(&mut self.bus, &mut self.hooks)
     }
 
-    pub fn step_batch(&mut self, max_instrs: u32) -> Result<u32, EmuError> {
+    pub fn step_batch(&mut self, max_instrs: u64) -> Result<u64, EmuError> {
         self.cpu
             .step_batch(&mut self.bus, &mut self.hooks, max_instrs)
     }

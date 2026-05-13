@@ -18,8 +18,8 @@ pub trait Cpu {
         &mut self,
         bus: &mut MemoryBus,
         hooks: &mut HookRegistry,
-        max_instrs: u32,
-    ) -> Result<u32, EmuError>;
+        max_instrs: u64,
+    ) -> Result<u64, EmuError>;
 
     fn read_reg(&self, reg_id: usize) -> Result<u64, EmuError>;
 

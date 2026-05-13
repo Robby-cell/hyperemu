@@ -395,8 +395,8 @@ impl Cpu for Armv7Cpu {
         &mut self,
         bus: &mut MemoryBus,
         hooks: &mut HookRegistry,
-        max_instrs: u32,
-    ) -> Result<u32, EmuError> {
+        max_instrs: u64,
+    ) -> Result<u64, EmuError> {
         let mut total_executed = 0;
         let run_code_hooks = !hooks.code_hooks.is_empty();
 
