@@ -118,6 +118,17 @@ impl<'a> X86Decoder<'a> {
                     src,
                 }
             }
+            0x8D => {
+                // LEA
+                let (src, reg) = self.decode_modrm();
+                match src {
+                    Operand::Mem(addr) => Instr::Lea {
+                        dest: self.map_reg(reg),
+                        src: addr,
+                    },
+                    _ => Instr::Unknown(opcode),
+                }
+            }
             0xB8..=0xBF => {
                 let reg = self.map_reg(opcode - 0xB8);
                 Instr::Mov {
@@ -139,6 +150,8 @@ impl<'a> X86Decoder<'a> {
                 let cond = unsafe { std::mem::transmute(opcode - 0x70) };
                 Instr::Jcc(cond, self.read_u8() as i8 as i32)
             }
+            0xEB => Instr::Jmp(self.read_u8() as i8 as i32), // JMP rel8
+            0xE9 => Instr::Jmp(self.read_u32() as i32),      // JMP rel32
             _ => Instr::Unknown(opcode),
         }
     }

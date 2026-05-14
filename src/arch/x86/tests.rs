@@ -455,3 +455,109 @@ fn test_x86_enum_memory_displacements() {
         "Global memory displacement read failed"
     );
 }
+
+#[test]
+fn test_x86_binary_negative_jump() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // X86 Assembly:
+    // 0x1000: 90       NOP
+    // 0x1001: 90       NOP
+    // 0x1002: EB FC    JMP -4 (Relative to next EIP 0x1004) -> Jumps to 0x1000
+    let code: [u8; 4] = [
+        0x90, // NOP
+        0x90, // NOP
+        0xEB, 0xFC, // JMP -4
+    ];
+    bus.write_bytes(0x1000, &code).unwrap();
+
+    cpu.regs[REG_EIP] = 0x1000;
+
+    // Step 1: NOP
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EIP], 0x1001);
+
+    // Step 2: NOP
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EIP], 0x1002);
+
+    // Step 3: JMP -4
+    // The decoder consumes 2 bytes, advancing EIP to 0x1004.
+    // 0x1004 + (-4) = 0x1000.
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(
+        cpu.regs[REG_EIP], 0x1000,
+        "Negative relative jump failed to wrap backwards"
+    );
+}
+
+#[test]
+fn test_x86_enum_lea_no_base() {
+    let (mut cpu, mut bus, _) = setup_test_env();
+
+    // Goal: LEA EAX, [EBX*4 + 0x20]
+    // Notice `base` is None. This tests the logic where an index exists but no base.
+    let mem = MemoryAddr {
+        base: None,
+        index: Some(GpReg::Ebx),
+        scale: 4,
+        disp: 0x20,
+    };
+
+    let instr = Instr::Lea {
+        dest: GpReg::Eax,
+        src: mem,
+    };
+
+    cpu.regs[REG_EBX] = 10;
+    cpu.regs[REG_EAX] = 0; // Initialize destination to 0
+
+    execute_instr(&mut cpu, instr, &mut bus).unwrap();
+
+    // EBX(10) * 4 = 40. Disp = 32 (0x20). Total = 72.
+    assert_eq!(
+        cpu.regs[REG_EAX], 72,
+        "LEA with index and displacement but NO base failed"
+    );
+}
+
+#[test]
+fn test_x86_enum_sub_sbb_borrow_chain() {
+    let (mut cpu, mut bus, _) = setup_test_env();
+
+    // Simulating 64-bit subtraction:
+    // 0x00000000_00000000 - 0x00000000_00000001
+
+    // Step 1: SUB low 32-bits (EAX = 0, EBX = 1)
+    cpu.regs[REG_EAX] = 0;
+    cpu.regs[REG_EBX] = 1;
+
+    let sub_low = Instr::Sub {
+        dest: Operand::Reg(GpReg::Eax),
+        src: Operand::Reg(GpReg::Ebx),
+    };
+    execute_instr(&mut cpu, sub_low, &mut bus).unwrap();
+
+    assert_eq!(
+        cpu.regs[REG_EAX], 0xFFFFFFFF,
+        "0 - 1 should wrap to 0xFFFFFFFF"
+    );
+    let f1 = EFlags::from_bits_retain(cpu.regs[REG_EFLAGS]);
+    assert!(f1.contains(EFlags::CF), "Carry Flag (Borrow) MUST be set");
+
+    // Step 2: SBB high 32-bits (ECX = 0, EDX = 0)
+    cpu.regs[REG_ECX] = 0;
+    cpu.regs[REG_EDX] = 0;
+
+    let sbb_high = Instr::Sbb {
+        dest: Operand::Reg(GpReg::Ecx),
+        src: Operand::Reg(GpReg::Edx),
+    };
+    execute_instr(&mut cpu, sbb_high, &mut bus).unwrap();
+
+    // ECX(0) - EDX(0) - Borrow(1) = 0xFFFFFFFF
+    assert_eq!(
+        cpu.regs[REG_ECX], 0xFFFFFFFF,
+        "SBB should subtract the Borrow Flag from previous operation"
+    );
+}

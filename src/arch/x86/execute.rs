@@ -11,16 +11,32 @@ pub fn execute_instr(cpu: &mut X86Cpu, instr: Instr, bus: &mut MemoryBus) -> Res
             let val = load_op(cpu, bus, src)?;
             store_op(cpu, bus, dest, val)?;
         }
+        Instr::Lea { dest, src } => {
+            let addr = calc_addr(cpu, src);
+            cpu.regs[dest as usize] = addr as u32;
+        }
         Instr::Add { dest, src } => {
             let v1 = load_op(cpu, bus, dest)?;
             let v2 = load_op(cpu, bus, src)?;
             let res = do_add(cpu, v1, v2, false);
             store_op(cpu, bus, dest, res)?;
         }
+        Instr::Adc { dest, src } => {
+            let v1 = load_op(cpu, bus, dest)?;
+            let v2 = load_op(cpu, bus, src)?;
+            let res = do_add(cpu, v1, v2, true);
+            store_op(cpu, bus, dest, res)?;
+        }
         Instr::Sub { dest, src } => {
             let v1 = load_op(cpu, bus, dest)?;
             let v2 = load_op(cpu, bus, src)?;
             let res = do_sub(cpu, v1, v2, false);
+            store_op(cpu, bus, dest, res)?;
+        }
+        Instr::Sbb { dest, src } => {
+            let v1 = load_op(cpu, bus, dest)?;
+            let v2 = load_op(cpu, bus, src)?;
+            let res = do_sub(cpu, v1, v2, true);
             store_op(cpu, bus, dest, res)?;
         }
         Instr::Xor { dest, src } => {
@@ -45,24 +61,6 @@ pub fn execute_instr(cpu: &mut X86Cpu, instr: Instr, bus: &mut MemoryBus) -> Res
             store_op(cpu, bus, op, val)?;
             cpu.regs[REG_ESP] = cpu.regs[REG_ESP].wrapping_add(4);
         }
-        Instr::Lea { dest, src } => {
-            // LEA calculates the memory address and stores the *address* in the register.
-            // It does NOT read from memory, and it does NOT update EFLAGS.
-            let addr = calc_addr(cpu, src);
-            cpu.regs[dest as usize] = addr as u32;
-        }
-        Instr::Adc { dest, src } => {
-            let v1 = load_op(cpu, bus, dest)?;
-            let v2 = load_op(cpu, bus, src)?;
-            let res = do_add(cpu, v1, v2, true); // true = Use Carry Flag
-            store_op(cpu, bus, dest, res)?;
-        }
-        Instr::Sbb { dest, src } => {
-            let v1 = load_op(cpu, bus, dest)?;
-            let v2 = load_op(cpu, bus, src)?;
-            let res = do_sub(cpu, v1, v2, true); // true = Use Carry Flag
-            store_op(cpu, bus, dest, res)?;
-        }
         Instr::Call(rel) => {
             let ret_addr = cpu.regs[REG_EIP];
             cpu.regs[REG_ESP] = cpu.regs[REG_ESP].wrapping_sub(4);
@@ -73,15 +71,15 @@ pub fn execute_instr(cpu: &mut X86Cpu, instr: Instr, bus: &mut MemoryBus) -> Res
             cpu.regs[REG_EIP] = bus.read_32(cpu.regs[REG_ESP] as u64)?;
             cpu.regs[REG_ESP] = cpu.regs[REG_ESP].wrapping_add(4);
         }
+        Instr::Jmp(rel) => {
+            cpu.regs[REG_EIP] = (cpu.regs[REG_EIP] as i32).wrapping_add(rel) as u32;
+        }
         Instr::Jcc(cond, rel) => {
             if check_condition(cpu, cond) {
                 cpu.regs[REG_EIP] = (cpu.regs[REG_EIP] as i32).wrapping_add(rel) as u32;
             }
         }
-        Instr::Int(vec) => {
-            let _ = vec;
-            return Err(EmuError::NotImplemented("x86 INT hooks"));
-        }
+        Instr::Int(_vec) => return Err(EmuError::NotImplemented("x86 INT hooks")),
         Instr::Nop => {}
         Instr::Unknown(op) => return Err(EmuError::InvalidInstruction(op as u64)),
         _ => return Err(EmuError::NotImplemented("x86 Op logic")),
@@ -96,14 +94,14 @@ fn set_logic_flags(cpu: &mut X86Cpu, res: u32) {
     let mut f = EFlags::from_bits_retain(cpu.regs[REG_EFLAGS]);
     f.set(EFlags::ZF, res == 0);
     f.set(EFlags::SF, (res >> 31) != 0);
-    f.set(EFlags::PF, (res as u8).count_ones().is_multiple_of(2));
+    f.set(EFlags::PF, (res as u8).count_ones() % 2 == 0);
     f.remove(EFlags::CF | EFlags::OF);
     cpu.regs[REG_EFLAGS] = f.bits();
 }
 
 #[inline(always)]
 fn do_add(cpu: &mut X86Cpu, a: u32, b: u32, carry: bool) -> u32 {
-    let c_in = if carry && (cpu.regs[REG_EFLAGS] & 1 != 0) {
+    let c_in = if carry && (cpu.regs[REG_EFLAGS] & EFlags::CF.bits() != 0) {
         1
     } else {
         0
@@ -116,14 +114,14 @@ fn do_add(cpu: &mut X86Cpu, a: u32, b: u32, carry: bool) -> u32 {
     f.set(EFlags::ZF, res == 0);
     f.set(EFlags::SF, (res >> 31) != 0);
     f.set(EFlags::OF, ((a ^ res) & (b ^ res)) >> 31 != 0);
-    f.set(EFlags::PF, (res as u8).count_ones().is_multiple_of(2));
+    f.set(EFlags::PF, (res as u8).count_ones() % 2 == 0);
     cpu.regs[REG_EFLAGS] = f.bits();
     res
 }
 
 #[inline(always)]
 fn do_sub(cpu: &mut X86Cpu, a: u32, b: u32, borrow: bool) -> u32 {
-    let b_in = if borrow && (cpu.regs[REG_EFLAGS] & 1 != 0) {
+    let b_in = if borrow && (cpu.regs[REG_EFLAGS] & EFlags::CF.bits() != 0) {
         1
     } else {
         0
@@ -136,7 +134,7 @@ fn do_sub(cpu: &mut X86Cpu, a: u32, b: u32, borrow: bool) -> u32 {
     f.set(EFlags::ZF, res == 0);
     f.set(EFlags::SF, (res >> 31) != 0);
     f.set(EFlags::OF, ((a ^ b) & (a ^ res)) >> 31 != 0);
-    f.set(EFlags::PF, (res as u8).count_ones().is_multiple_of(2));
+    f.set(EFlags::PF, (res as u8).count_ones() % 2 == 0);
     cpu.regs[REG_EFLAGS] = f.bits();
     res
 }
@@ -176,9 +174,9 @@ fn load_op(cpu: &X86Cpu, bus: &mut MemoryBus, op: Operand) -> Result<u32, EmuErr
     match op {
         Operand::Reg(r) => Ok(cpu.regs[r as usize]),
         Operand::Imm32(i) => Ok(i),
+        Operand::Imm16(i) => Ok(i as u32),
         Operand::Imm8(i) => Ok(i as u32),
         Operand::Mem(m) => bus.read_32(calc_addr(cpu, m)),
-        _ => Err(EmuError::NotImplemented("X86 Operand Size")),
     }
 }
 
