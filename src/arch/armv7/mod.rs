@@ -30,6 +30,7 @@ pub struct Armv7Cpu {
 
     // We store a simple, flat representation of the instruction
     cache_tags: Box<[u32]>,
+    cache_raw: Box<[u32]>,
     cache_instrs: Box<[Instr]>,
 }
 
@@ -332,7 +333,7 @@ impl Armv7Cpu {
         let pc_val = self.regs[REG_PC];
 
         // Refresh fetch pointer if we crossed a region boundary
-        if pc_val < self.fetch_base || pc_val >= self.fetch_base + self.fetch_len {
+        if pc_val < self.fetch_base || pc_val.wrapping_add(4) > self.fetch_base + self.fetch_len {
             self.refresh_fetch_ptr(bus)?;
         }
 
@@ -351,14 +352,17 @@ impl Armv7Cpu {
         self.regs[REG_PC] = next_pc;
 
         let cache_idx = ((pc_val >> 2) as usize) & (DECODE_CACHE_SIZE - 1);
-        let instr = if self.cache_tags[cache_idx] == pc_val {
-            self.cache_instrs[cache_idx].clone()
-        } else {
-            let decoded = decode::decode_arm(raw_instr);
-            self.cache_tags[cache_idx] = pc_val;
-            self.cache_instrs[cache_idx] = decoded.clone();
-            decoded
-        };
+
+        let instr =
+            if self.cache_tags[cache_idx] == pc_val && self.cache_raw[cache_idx] == raw_instr {
+                self.cache_instrs[cache_idx].clone()
+            } else {
+                let decoded = decode::decode_arm(raw_instr);
+                self.cache_tags[cache_idx] = pc_val;
+                self.cache_raw[cache_idx] = raw_instr;
+                self.cache_instrs[cache_idx] = decoded.clone();
+                decoded
+            };
 
         execute::execute_instr(self, instr, bus, hooks)?;
 
@@ -380,6 +384,7 @@ impl Cpu for Armv7Cpu {
             fetch_len: 0,
 
             cache_instrs: vec![Instr::Unknown(0); DECODE_CACHE_SIZE].into_boxed_slice(),
+            cache_raw: vec![0; DECODE_CACHE_SIZE].into_boxed_slice(),
             cache_tags: vec![0xFFFFFFFF; DECODE_CACHE_SIZE].into_boxed_slice(),
         })
     }
