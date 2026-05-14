@@ -489,3 +489,66 @@ fn test_gui_led_blinking_pull_model() {
         "GUI pulled state and LED should be OFF!"
     );
 }
+
+#[test]
+fn test_arm_self_modifying_code() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // 0xE3A00001: MOV r0, #1
+    bus.write_32(0x1000, 0xE3A00001).unwrap();
+    cpu.regs[15] = 0x1000;
+
+    // Step 1: Execute the first instruction. It will be cached.
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[0], 1);
+
+    // Reset PC back to 0x1000 (Simulating a loop or jump back)
+    cpu.regs[15] = 0x1000;
+
+    // OVERWRITE memory at 0x1000 with: 0xE3A00002: MOV r0, #2
+    // This is Self-Modifying Code (SMC)
+    bus.write_32(0x1000, 0xE3A00002).unwrap();
+
+    // Step 2: Execute again.
+    // If our decode cache ignores raw memory changes, it will execute `MOV r0, #1` again.
+    // Because we added `cache_raw`, it should detect the change, invalidate, and load `2`.
+    cpu.step(&mut bus, &mut hooks).unwrap();
+
+    assert_eq!(
+        cpu.regs[0], 2,
+        "SMC failed: Emulator executed stale cached instruction!"
+    );
+}
+
+#[test]
+fn test_arm_ldm_writeback_shadowing() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // Setup Dummy Data
+    bus.write_32(0x1000, 0xCAFEBABE).unwrap();
+    bus.write_32(0x1004, 0xDEADBEEF).unwrap();
+
+    // R0 is our base register for the LDM
+    cpu.regs[0] = 0x1000;
+
+    // Instruction: LDMIA r0!, {r0, r1}
+    // (Load Multiple, Increment After, Writeback)
+    // Notice that R0 is both the BASE (with writeback) AND in the destination list.
+    // Encoding: 0xE8B00003
+    bus.write_32(0x1000 + 8, 0xE8B00003).unwrap();
+    cpu.regs[15] = 0x1008;
+
+    cpu.step(&mut bus, &mut hooks).unwrap();
+
+    assert_eq!(
+        cpu.regs[1], 0xDEADBEEF,
+        "R1 should be loaded with the second word"
+    );
+
+    // ARM Architecture Rule: If the base register is in the list,
+    // the loaded memory value OVERWRITES the writeback value.
+    assert_eq!(
+        cpu.regs[0], 0xCAFEBABE,
+        "Writeback shadowing failed! R0 was incorrectly set to the writeback address (0x1008) instead of the loaded memory value."
+    );
+}

@@ -655,18 +655,21 @@ pub fn execute_instr(
             }
             let mut current_addr = if p == u { addr.wrapping_add(4) } else { addr };
 
-            for i in 0..16 {
-                if (reg_list & (1 << i)) != 0 {
-                    cpu.regs[i] = cpu.read_data_32(bus, current_addr)?;
-                    current_addr += 4;
-                }
-            }
-
+            // Perform Writeback BEFORE the loads.
+            // If `rn` is inside `reg_list`, the loaded memory value
+            // will correctly overwrite the address writeback, matching silicon behavior.
             if w {
                 if u {
                     cpu.regs[rn as usize] = cpu.regs[rn as usize].wrapping_add(total_bytes);
                 } else {
                     cpu.regs[rn as usize] = cpu.regs[rn as usize].wrapping_sub(total_bytes);
+                }
+            }
+
+            for i in 0..16 {
+                if (reg_list & (1 << i)) != 0 {
+                    cpu.regs[i] = cpu.read_data_32(bus, current_addr)?;
+                    current_addr += 4;
                 }
             }
         }
