@@ -69,7 +69,7 @@ impl X86Cpu {
         let next_pc = pc.wrapping_add(bytes as u32);
         self.regs[REG_EIP] = next_pc;
 
-        execute::execute_instr(self, instr, bus)?;
+        execute::execute_instr(self, instr, bus, hooks)?;
 
         // Return true if the instruction caused a branch (EIP was manually overwritten)
         Ok(self.regs[REG_EIP] != next_pc)

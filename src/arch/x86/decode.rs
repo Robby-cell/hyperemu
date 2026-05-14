@@ -101,6 +101,45 @@ impl<'a> X86Decoder<'a> {
     pub fn decode_instr(&mut self) -> Instr {
         let opcode = self.read_u8();
         match opcode {
+            // 0x40-0x4F: INC / DEC r32
+            0x40..=0x47 => Instr::Inc(Operand::Reg(self.map_reg(opcode - 0x40))),
+            0x48..=0x4F => Instr::Dec(Operand::Reg(self.map_reg(opcode - 0x48))),
+
+            // 0xC7: MOV r/m32, imm32
+            0xC7 => {
+                let (dest, _) = self.decode_modrm();
+                Instr::Mov {
+                    dest,
+                    src: Operand::Imm32(self.read_u32()),
+                }
+            }
+
+            // 0x81: Group 1 (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m32, imm32)
+            // 0x83: Group 1 (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m32, imm8 sign-extended)
+            0x81 | 0x83 => {
+                let (dest, reg_op) = self.decode_modrm();
+
+                // If 0x83, read 1 byte and sign extend to 32. If 0x81, read 4 bytes.
+                let imm = if opcode == 0x83 {
+                    self.read_u8() as i8 as i32 as u32
+                } else {
+                    self.read_u32()
+                };
+                let src = Operand::Imm32(imm);
+
+                match reg_op {
+                    0 => Instr::Add { dest, src },
+                    1 => Instr::Or { dest, src },
+                    2 => Instr::Adc { dest, src },
+                    3 => Instr::Sbb { dest, src },
+                    4 => Instr::And { dest, src },
+                    5 => Instr::Sub { dest, src },
+                    6 => Instr::Xor { dest, src },
+                    7 => Instr::Cmp { dest, src },
+                    _ => unreachable!(),
+                }
+            }
+
             0x90 => Instr::Nop,
             0x50..=0x57 => Instr::Push(Operand::Reg(self.map_reg(opcode - 0x50))),
             0x58..=0x5F => Instr::Pop(Operand::Reg(self.map_reg(opcode - 0x58))),

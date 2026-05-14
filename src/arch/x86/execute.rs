@@ -3,9 +3,15 @@ use super::instr::*;
 use super::registers::*;
 use crate::bus::MemoryBus;
 use crate::error::EmuError;
+use crate::hook::HookRegistry;
 
 #[inline(always)]
-pub fn execute_instr(cpu: &mut X86Cpu, instr: Instr, bus: &mut MemoryBus) -> Result<(), EmuError> {
+pub fn execute_instr(
+    cpu: &mut X86Cpu,
+    instr: Instr,
+    bus: &mut MemoryBus,
+    hooks: &mut HookRegistry,
+) -> Result<(), EmuError> {
     match instr {
         Instr::Mov { dest, src } => {
             let val = load_op(cpu, bus, src)?;
@@ -58,9 +64,40 @@ pub fn execute_instr(cpu: &mut X86Cpu, instr: Instr, bus: &mut MemoryBus) -> Res
         }
         Instr::Pop(op) => {
             let val = bus.read_32(cpu.regs[REG_ESP] as u64)?;
-            store_op(cpu, bus, op, val)?;
+            // Increment ESP first
             cpu.regs[REG_ESP] = cpu.regs[REG_ESP].wrapping_add(4);
+            // Then store the value. If `op` is ESP, it correctly overwrites the increment.
+            store_op(cpu, bus, op, val)?;
         }
+
+        Instr::Test { dest, src } => {
+            let v1 = load_op(cpu, bus, dest)?;
+            let v2 = load_op(cpu, bus, src)?;
+            let res = v1 & v2;
+            // TEST performs a bitwise AND, discards the result, and sets flags
+            set_logic_flags(cpu, res);
+        }
+        Instr::Inc(op) => {
+            let v = load_op(cpu, bus, op)?;
+            // INC does NOT affect the Carry Flag on x86. We must preserve it.
+            let old_cf = cpu.regs[REG_EFLAGS] & EFlags::CF.bits();
+            let res = do_add(cpu, v, 1, false);
+
+            // Restore Carry Flag
+            cpu.regs[REG_EFLAGS] = (cpu.regs[REG_EFLAGS] & !EFlags::CF.bits()) | old_cf;
+            store_op(cpu, bus, op, res)?;
+        }
+        Instr::Dec(op) => {
+            let v = load_op(cpu, bus, op)?;
+            // DEC also does NOT affect the Carry Flag.
+            let old_cf = cpu.regs[REG_EFLAGS] & EFlags::CF.bits();
+            let res = do_sub(cpu, v, 1, false);
+
+            // Restore Carry Flag
+            cpu.regs[REG_EFLAGS] = (cpu.regs[REG_EFLAGS] & !EFlags::CF.bits()) | old_cf;
+            store_op(cpu, bus, op, res)?;
+        }
+
         Instr::Call(rel) => {
             let ret_addr = cpu.regs[REG_EIP];
             cpu.regs[REG_ESP] = cpu.regs[REG_ESP].wrapping_sub(4);
@@ -79,9 +116,20 @@ pub fn execute_instr(cpu: &mut X86Cpu, instr: Instr, bus: &mut MemoryBus) -> Res
                 cpu.regs[REG_EIP] = (cpu.regs[REG_EIP] as i32).wrapping_add(rel) as u32;
             }
         }
-        Instr::Int(_vec) => return Err(EmuError::NotImplemented("x86 INT hooks")),
+        Instr::Int(vec) => {
+            let handled = hooks.trigger_interrupt(cpu, bus, vec as u32)?;
+            if !handled {
+                if vec == 3 {
+                    // Standard x86 Debug Breakpoint
+                    return Err(EmuError::Breakpoint(3));
+                }
+                return Err(EmuError::NotImplemented("Unhandled x86 Software Interrupt"));
+            }
+        }
         Instr::Nop => {}
+        Instr::Hlt => return Err(EmuError::Breakpoint(0)),
         Instr::Unknown(op) => return Err(EmuError::InvalidInstruction(op as u64)),
+
         _ => return Err(EmuError::NotImplemented("x86 Op logic")),
     }
     Ok(())
