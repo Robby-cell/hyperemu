@@ -635,7 +635,6 @@ fn test_x86_syscall_interception() {
 fn test_x86_pop_esp_quirk() {
     let (mut cpu, mut bus, mut hooks) = setup_test_env();
 
-    // The x86 Quirks manual states:
     // "POP ESP reads the value from the stack, increments the internal ESP,
     //  and THEN stores the read value into ESP, discarding the increment."
 
@@ -701,7 +700,7 @@ fn test_x86_group1_immediate_math() {
 fn test_x86_inc_dec_carry_preservation() {
     let (mut cpu, mut bus, mut hooks) = setup_test_env();
 
-    // INC and DEC are famous in x86 for modifying Zero, Sign, Parity, and Overflow,
+    // INC and DEC in x86 for modify Zero, Sign, Parity, and Overflow,
     // but INTENTIONALLY LEAVING CARRY (CF) UNTOUCHED. This allows them to be used in ADC/SBB loops.
 
     // 0x40 = INC EAX
@@ -785,4 +784,192 @@ fn test_x86_test_instruction() {
         cpu.regs[REG_EAX], 0x80000000,
         "TEST must not modify the destination register"
     );
+}
+
+#[test]
+fn test_x86_accumulator_and_standard_math() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // 1. ADD EAX, 0x12345678 (Accumulator-specific, Opcode 0x05)
+    // 2. SUB EBX, ECX        (Standard R/M, Opcode 0x2B)
+    // 3. AND EAX, 0x000000FF (Accumulator-specific, Opcode 0x25)
+    let code: [u8; 12] = [
+        0x05, 0x78, 0x56, 0x34, 0x12, // ADD EAX, 0x12345678
+        0x2B, 0xD9, // SUB EBX, ECX
+        0x25, 0xFF, 0x00, 0x00, 0x00, // AND EAX, 0x000000FF
+    ];
+    bus.write_bytes(0x1000, &code).unwrap();
+    cpu.regs[REG_EIP] = 0x1000;
+
+    cpu.regs[REG_EAX] = 0x00000000;
+    cpu.regs[REG_EBX] = 100;
+    cpu.regs[REG_ECX] = 40;
+
+    // Execute ADD EAX, imm32
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EAX], 0x12345678, "0x05 ADD EAX failed");
+
+    // Execute SUB EBX, ECX
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EBX], 60, "0x2B SUB r32, r/m32 failed");
+
+    // Execute AND EAX, imm32
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EAX], 0x78, "0x25 AND EAX failed");
+}
+
+#[test]
+fn test_x86_neg_and_not() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // 0xF7 0xD0 = NOT EAX
+    // 0xF7 0xDB = NEG EBX
+    let code: [u8; 4] = [
+        0xF7, 0xD0, // NOT EAX
+        0xF7, 0xDB, // NEG EBX
+    ];
+    bus.write_bytes(0x1000, &code).unwrap();
+    cpu.regs[REG_EIP] = 0x1000;
+
+    cpu.regs[REG_EAX] = 0x00000000;
+    cpu.regs[REG_EBX] = 0x00000001;
+
+    // Step NOT EAX
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EAX], 0xFFFFFFFF, "NOT failed to invert bits");
+
+    // Step NEG EBX
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(
+        cpu.regs[REG_EBX], 0xFFFFFFFF,
+        "NEG 1 should result in -1 (0xFFFFFFFF)"
+    );
+
+    let f = EFlags::from_bits_retain(cpu.regs[REG_EFLAGS]);
+    assert!(
+        f.contains(EFlags::CF),
+        "NEG of non-zero value MUST set Carry Flag"
+    );
+    assert!(f.contains(EFlags::SF), "NEG of 1 MUST set Sign Flag");
+}
+
+#[test]
+fn test_x86_leave_instruction() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // 0xC9 = LEAVE
+    bus.write_bytes(0x1000, &[0xC9]).unwrap();
+    cpu.regs[REG_EIP] = 0x1000;
+
+    // Simulate a standard stack frame layout inside valid RAM (0x1000 - 0x1FFF)
+    // EBP points to the current frame base (0x1F00)
+    // ESP points to local variables deep in the stack (0x1EF0)
+    cpu.regs[REG_EBP] = 0x1F00;
+    cpu.regs[REG_ESP] = 0x1EF0;
+
+    // At the base of the current frame (0x1F00), the CALLER's EBP is stored (0x1F80)
+    bus.write_32(0x1F00, 0x1F80).unwrap();
+
+    cpu.step(&mut bus, &mut hooks).unwrap();
+
+    // 1. EBP should now be the caller's EBP (0x1F80)
+    // 2. ESP should be pointing just above the old EBP (0x1F00 + 4 = 0x1F04)
+    assert_eq!(
+        cpu.regs[REG_EBP], 0x1F80,
+        "LEAVE failed to pop caller's EBP"
+    );
+    assert_eq!(
+        cpu.regs[REG_ESP], 0x1F04,
+        "LEAVE failed to restore and increment ESP"
+    );
+}
+
+#[test]
+fn test_x86_mul_div() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // 0xF7 0xE3 = MUL EBX (EDX:EAX = EAX * EBX)
+    // 0xF7 0xF3 = DIV EBX (EAX = EDX:EAX / EBX, EDX = Remainder)
+    let code: [u8; 4] = [0xF7, 0xE3, 0xF7, 0xF3];
+    bus.write_bytes(0x1000, &code).unwrap();
+    cpu.regs[REG_EIP] = 0x1000;
+
+    cpu.regs[REG_EAX] = 0x80000000;
+    cpu.regs[REG_EBX] = 2;
+
+    // Step 1: MUL (0x80000000 * 2 = 0x00000001_00000000)
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(
+        cpu.regs[REG_EAX], 0,
+        "Lower 32-bits of MUL should overflow to 0"
+    );
+    assert_eq!(cpu.regs[REG_EDX], 1, "Upper 32-bits of MUL should hold 1");
+
+    let f = EFlags::from_bits_retain(cpu.regs[REG_EFLAGS]);
+    assert!(
+        f.contains(EFlags::CF | EFlags::OF),
+        "CF/OF must be set if EDX != 0"
+    );
+
+    // Step 2: DIV (0x1_00000000 / 2 = 0x80000000)
+    // EDX and EAX are already perfectly positioned from the MUL!
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(
+        cpu.regs[REG_EAX], 0x80000000,
+        "Quotient should be 0x80000000"
+    );
+    assert_eq!(cpu.regs[REG_EDX], 0, "Remainder should be 0");
+}
+
+#[test]
+fn test_x86_shifts() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // 0xC1 0xE0 0x02 = SHL EAX, 2
+    // 0xC1 0xF8 0x02 = SAR EAX, 2
+    let code: [u8; 6] = [0xC1, 0xE0, 0x02, 0xC1, 0xF8, 0x02];
+    bus.write_bytes(0x1000, &code).unwrap();
+    cpu.regs[REG_EIP] = 0x1000;
+
+    // 0xC0000000 = 11000000...
+    cpu.regs[REG_EAX] = 0xC0000000;
+
+    // Step 1: SHL EAX, 2 -> 0x00000000. Carry Flag receives the last shifted out bit (1)
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EAX], 0);
+    let f1 = EFlags::from_bits_retain(cpu.regs[REG_EFLAGS]);
+    assert!(
+        f1.contains(EFlags::CF),
+        "SHL must push bits into Carry Flag"
+    );
+
+    // Re-dirty for SAR
+    // 0x80000000 = 1000...
+    cpu.regs[REG_EAX] = 0x80000000;
+
+    // Step 2: SAR EAX, 2 -> 0xE0000000 (Sign-extended!)
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EAX], 0xE0000000, "SAR must duplicate sign bit");
+}
+
+#[test]
+fn test_x86_zero_and_sign_extensions() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // 0x0F 0xB6 0xC3 = MOVZX EAX, BL
+    // 0x0F 0xBE 0xC3 = MOVSX EAX, BL
+    let code: [u8; 6] = [0x0F, 0xB6, 0xC3, 0x0F, 0xBE, 0xC3];
+    bus.write_bytes(0x1000, &code).unwrap();
+    cpu.regs[REG_EIP] = 0x1000;
+
+    // EBX low byte is 0xFF (-1 signed, 255 unsigned)
+    cpu.regs[REG_EBX] = 0xFF;
+
+    // Step 1: MOVZX
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EAX], 0x000000FF, "MOVZX failed to zero-pad");
+
+    // Step 2: MOVSX
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EAX], 0xFFFFFFFF, "MOVSX failed to sign-extend");
 }

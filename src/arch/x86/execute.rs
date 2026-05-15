@@ -66,7 +66,7 @@ pub fn execute_instr(
             let val = bus.read_32(cpu.regs[REG_ESP] as u64)?;
             // Increment ESP first
             cpu.regs[REG_ESP] = cpu.regs[REG_ESP].wrapping_add(4);
-            // Then store the value. If `op` is ESP, it correctly overwrites the increment.
+            // Then store the value. If `op` is ESP, it correctly overwrites the increment
             store_op(cpu, bus, op, val)?;
         }
 
@@ -89,7 +89,7 @@ pub fn execute_instr(
         }
         Instr::Dec(op) => {
             let v = load_op(cpu, bus, op)?;
-            // DEC also does NOT affect the Carry Flag.
+            // DEC does NOT affect the Carry Flag
             let old_cf = cpu.regs[REG_EFLAGS] & EFlags::CF.bits();
             let res = do_sub(cpu, v, 1, false);
 
@@ -98,6 +98,139 @@ pub fn execute_instr(
             store_op(cpu, bus, op, res)?;
         }
 
+        Instr::Not(op) => {
+            let val = load_op(cpu, bus, op)?;
+            store_op(cpu, bus, op, !val)?;
+            // NOT does not touch EFLAGS
+        }
+        Instr::Neg(op) => {
+            let val = load_op(cpu, bus, op)?;
+            let res = do_sub(cpu, 0, val, false);
+            store_op(cpu, bus, op, res)?;
+            // NEG inherently updates EFLAGS perfectly via do_sub
+        }
+
+        Instr::And { dest, src } => {
+            let v1 = load_op(cpu, bus, dest)?;
+            let v2 = load_op(cpu, bus, src)?;
+            let res = v1 & v2;
+            store_op(cpu, bus, dest, res)?;
+            set_logic_flags(cpu, res);
+        }
+        Instr::Or { dest, src } => {
+            let v1 = load_op(cpu, bus, dest)?;
+            let v2 = load_op(cpu, bus, src)?;
+            let res = v1 | v2;
+            store_op(cpu, bus, dest, res)?;
+            set_logic_flags(cpu, res);
+        }
+
+        Instr::Mul(op) => {
+            let v = load_op(cpu, bus, op)?;
+            let res = (cpu.regs[REG_EAX] as u64).wrapping_mul(v as u64);
+            cpu.regs[REG_EAX] = res as u32;
+            cpu.regs[REG_EDX] = (res >> 32) as u32;
+
+            let mut f = EFlags::from_bits_retain(cpu.regs[REG_EFLAGS]);
+            if cpu.regs[REG_EDX] != 0 {
+                f.insert(EFlags::CF | EFlags::OF);
+            } else {
+                f.remove(EFlags::CF | EFlags::OF);
+            }
+            cpu.regs[REG_EFLAGS] = f.bits();
+        }
+        Instr::Imul(dest, src) => {
+            let v1 = load_op(cpu, bus, dest)? as i32 as i64;
+            let v2 = load_op(cpu, bus, src)? as i32 as i64;
+            let res = v1.wrapping_mul(v2);
+            store_op(cpu, bus, dest, res as u32)?;
+
+            let mut f = EFlags::from_bits_retain(cpu.regs[REG_EFLAGS]);
+            if res != (res as i32 as i64) {
+                f.insert(EFlags::CF | EFlags::OF);
+            } else {
+                f.remove(EFlags::CF | EFlags::OF);
+            }
+            cpu.regs[REG_EFLAGS] = f.bits();
+        }
+        Instr::Div(op) => {
+            let divisor = load_op(cpu, bus, op)?;
+            if divisor == 0 {
+                return Err(EmuError::DeviceError("Divide by zero (#DE)".into()));
+            }
+            let dividend = ((cpu.regs[REG_EDX] as u64) << 32) | (cpu.regs[REG_EAX] as u64);
+            let quot = dividend / (divisor as u64);
+            let rem = dividend % (divisor as u64);
+            if quot > 0xFFFFFFFF {
+                return Err(EmuError::DeviceError("Divide overflow (#DE)".into()));
+            }
+            cpu.regs[REG_EAX] = quot as u32;
+            cpu.regs[REG_EDX] = rem as u32;
+        }
+        Instr::Shl { dest, count } => {
+            let v = load_op(cpu, bus, dest)?;
+            let c = load_op(cpu, bus, count)? & 0x1F;
+            if c > 0 {
+                let res = v << c;
+                store_op(cpu, bus, dest, res)?;
+                set_logic_flags(cpu, res);
+                let mut f = EFlags::from_bits_retain(cpu.regs[REG_EFLAGS]);
+                f.set(EFlags::CF, ((v >> (32 - c)) & 1) != 0);
+                cpu.regs[REG_EFLAGS] = f.bits();
+            }
+        }
+        Instr::Shr { dest, count } => {
+            let v = load_op(cpu, bus, dest)?;
+            let c = load_op(cpu, bus, count)? & 0x1F;
+            if c > 0 {
+                let res = v >> c;
+                store_op(cpu, bus, dest, res)?;
+                set_logic_flags(cpu, res);
+                let mut f = EFlags::from_bits_retain(cpu.regs[REG_EFLAGS]);
+                f.set(EFlags::CF, ((v >> (c - 1)) & 1) != 0);
+                cpu.regs[REG_EFLAGS] = f.bits();
+            }
+        }
+        Instr::Sar { dest, count } => {
+            let v = load_op(cpu, bus, dest)? as i32;
+            let c = load_op(cpu, bus, count)? & 0x1F;
+            if c > 0 {
+                let res = (v >> c) as u32;
+                store_op(cpu, bus, dest, res)?;
+                set_logic_flags(cpu, res);
+                let mut f = EFlags::from_bits_retain(cpu.regs[REG_EFLAGS]);
+                f.set(EFlags::CF, ((v >> (c - 1)) & 1) != 0);
+                cpu.regs[REG_EFLAGS] = f.bits();
+            }
+        }
+        Instr::Movzx8 { dest, src } => {
+            // Read ONLY 8 bits, extend to 32 bits (zero-padded)
+            let val = match src {
+                Operand::Reg(r) => cpu.regs[r as usize] & 0xFF,
+                Operand::Mem(m) => bus.read_8(calc_addr(cpu, m))? as u32,
+                _ => unreachable!(),
+            };
+            store_op(cpu, bus, dest, val)?;
+        }
+        Instr::Movsx8 { dest, src } => {
+            // Read ONLY 8 bits, sign-extend to 32 bits
+            let val = match src {
+                Operand::Reg(r) => (cpu.regs[r as usize] as i8) as i32 as u32,
+                Operand::Mem(m) => (bus.read_8(calc_addr(cpu, m))? as i8) as i32 as u32,
+                _ => unreachable!(),
+            };
+            store_op(cpu, bus, dest, val)?;
+        }
+
+        Instr::Leave => {
+            // 1. ESP = EBP
+            cpu.regs[REG_ESP] = cpu.regs[REG_EBP];
+
+            // 2. POP EBP
+            let val = bus.read_32(cpu.regs[REG_ESP] as u64)?;
+            cpu.regs[REG_EBP] = val;
+            cpu.regs[REG_ESP] = cpu.regs[REG_ESP].wrapping_add(4);
+        }
         Instr::Call(rel) => {
             let ret_addr = cpu.regs[REG_EIP];
             cpu.regs[REG_ESP] = cpu.regs[REG_ESP].wrapping_sub(4);
@@ -120,7 +253,7 @@ pub fn execute_instr(
             let handled = hooks.trigger_interrupt(cpu, bus, vec as u32)?;
             if !handled {
                 if vec == 3 {
-                    // Standard x86 Debug Breakpoint
+                    // x86 Debug Breakpoint
                     return Err(EmuError::Breakpoint(3));
                 }
                 return Err(EmuError::NotImplemented("Unhandled x86 Software Interrupt"));
@@ -129,8 +262,6 @@ pub fn execute_instr(
         Instr::Nop => {}
         Instr::Hlt => return Err(EmuError::Breakpoint(0)),
         Instr::Unknown(op) => return Err(EmuError::InvalidInstruction(op as u64)),
-
-        _ => return Err(EmuError::NotImplemented("x86 Op logic")),
     }
     Ok(())
 }

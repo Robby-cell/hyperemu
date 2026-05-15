@@ -48,6 +48,16 @@ pub enum Instr {
     Inc(Operand),
     Dec(Operand),
     Neg(Operand),
+    Not(Operand),
+
+    Mul(Operand),           // Unsigned EDX:EAX = EAX * r/m32
+    Imul(Operand, Operand), // Signed dest *= src
+    Div(Operand),           // Unsigned EAX = EDX:EAX / r/m32, EDX = Remainder
+    Shl { dest: Operand, count: Operand },
+    Shr { dest: Operand, count: Operand },
+    Sar { dest: Operand, count: Operand },
+    Movzx8 { dest: Operand, src: Operand }, // Zero-extend 8-bit to 32-bit
+    Movsx8 { dest: Operand, src: Operand }, // Sign-extend 8-bit to 32-bit
 
     // Control Flow
     Jmp(i32), // Relative
