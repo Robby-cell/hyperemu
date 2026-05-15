@@ -348,6 +348,7 @@ impl Armv7Cpu {
             u32::from_le(ptr.read_unaligned())
         };
 
+        // Advance PC *before* execution
         let next_pc = pc_val.wrapping_add(4);
         self.regs[REG_PC] = next_pc;
 
@@ -364,9 +365,15 @@ impl Armv7Cpu {
                 decoded
             };
 
-        execute::execute_instr(self, instr, bus, hooks)?;
-
-        Ok(self.regs[REG_PC] != next_pc)
+        // Catch the execution error and rewind
+        match execute::execute_instr(self, instr, bus, hooks) {
+            Ok(()) => Ok(self.regs[REG_PC] != next_pc),
+            Err(e) => {
+                // REWIND PC so the debugger highlights the exact faulting line
+                self.regs[REG_PC] = pc_val;
+                Err(e)
+            }
+        }
     }
 }
 
