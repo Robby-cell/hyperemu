@@ -180,7 +180,6 @@ pub fn execute_instr(
             let v = load_op(cpu, bus, dest)?;
             let c = load_op(cpu, bus, count)? & 0x1F;
             if c > 0 {
-                // Ensure proper sign extension based on operand size!
                 let v_signed = match dest.size() {
                     OpSize::Byte => (v as i8) as i32,
                     OpSize::Word => (v as i16) as i32,
@@ -289,7 +288,7 @@ pub fn execute_instr(
     Ok(())
 }
 
-// FLAG CALCULATION LOGIC
+// SIZE AWARE FLAG EVALUATION
 
 #[inline(always)]
 fn set_logic_flags(cpu: &mut X86Cpu, res: u32, size: OpSize) {
@@ -308,7 +307,7 @@ fn set_logic_flags(cpu: &mut X86Cpu, res: u32, size: OpSize) {
             f.set(EFlags::SF, (res >> 31) != 0);
         }
     }
-    f.set(EFlags::PF, (res as u8).count_ones().is_multiple_of(2));
+    f.set(EFlags::PF, (res as u8).count_ones() % 2 == 0);
     f.remove(EFlags::CF | EFlags::OF);
     cpu.regs[REG_EFLAGS] = f.bits();
 }
@@ -355,7 +354,7 @@ fn do_add(cpu: &mut X86Cpu, a: u32, b: u32, carry: bool, size: OpSize) -> u32 {
             res = r;
         }
     }
-    f.set(EFlags::PF, (res as u8).count_ones().is_multiple_of(2));
+    f.set(EFlags::PF, (res as u8).count_ones() % 2 == 0);
     cpu.regs[REG_EFLAGS] = f.bits();
     res
 }
@@ -405,7 +404,7 @@ fn do_sub(cpu: &mut X86Cpu, a: u32, b: u32, borrow: bool, size: OpSize) -> u32 {
             res = r;
         }
     }
-    f.set(EFlags::PF, (res as u8).count_ones().is_multiple_of(2));
+    f.set(EFlags::PF, (res as u8).count_ones() % 2 == 0);
     cpu.regs[REG_EFLAGS] = f.bits();
     res
 }
@@ -438,7 +437,7 @@ fn check_condition(cpu: &X86Cpu, cond: Condition) -> bool {
     }
 }
 
-// HELPERS
+// SIZE AWARE OPERAND FETCHING
 
 #[inline(always)]
 fn load_op(cpu: &X86Cpu, bus: &mut MemoryBus, op: Operand) -> Result<u32, EmuError> {
@@ -494,8 +493,8 @@ fn store_op(cpu: &mut X86Cpu, bus: &mut MemoryBus, op: Operand, val: u32) -> Res
 #[inline(always)]
 fn calc_addr(cpu: &X86Cpu, m: MemoryAddr) -> u64 {
     let mut addr = m.disp;
-    if let Some(base) = m.base {
-        addr = addr.wrapping_add(cpu.regs[base as usize] as i32);
+    if let Some(b) = m.base {
+        addr = addr.wrapping_add(cpu.regs[b as usize] as i32);
     }
     if let Some(idx) = m.index {
         addr = addr.wrapping_add((cpu.regs[idx as usize] as i32).wrapping_mul(m.scale as i32));

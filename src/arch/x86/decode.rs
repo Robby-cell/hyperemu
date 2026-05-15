@@ -121,10 +121,9 @@ impl<'a> X86Decoder<'a> {
     }
 
     pub fn decode_instr(&mut self) -> Instr {
-        let mut has_66 = false; // 16-bit Operand Override Prefix
+        let mut has_66 = false;
         let mut opcode = self.read_u8();
 
-        // Loop over x86 Prefixes
         while opcode == 0x66 {
             has_66 = true;
             opcode = self.read_u8();
@@ -142,12 +141,10 @@ impl<'a> X86Decoder<'a> {
                         self.read_u32() as i32,
                     ),
                     0xAF => {
-                        // IMUL
                         let (src, reg) = self.decode_modrm(size);
                         Instr::Imul(self.map_reg(reg, size), src)
                     }
                     0xB6 => {
-                        // MOVZX r16/32, r/m8
                         let (src, reg) = self.decode_modrm(OpSize::Byte);
                         Instr::Movzx8 {
                             dest: self.map_reg(reg, size),
@@ -155,7 +152,6 @@ impl<'a> X86Decoder<'a> {
                         }
                     }
                     0xBE => {
-                        // MOVSX r16/32, r/m8
                         let (src, reg) = self.decode_modrm(OpSize::Byte);
                         Instr::Movsx8 {
                             dest: self.map_reg(reg, size),
@@ -166,7 +162,6 @@ impl<'a> X86Decoder<'a> {
                 }
             }
 
-            // Master ALU Block (Opcodes 0x00 - 0x3F)
             0x00..=0x3F => {
                 let op_base = opcode & 0xF8;
                 let is_8bit = (opcode & 1) == 0;
@@ -180,12 +175,10 @@ impl<'a> X86Decoder<'a> {
 
                 match opcode & 7 {
                     0 | 1 => {
-                        // r/m, r
                         let (dest, reg) = self.decode_modrm(size);
                         self.build_alu(op_base, dest, self.map_reg(reg, size))
                     }
                     2 | 3 => {
-                        // r, r/m
                         let (src, reg) = self.decode_modrm(size);
                         self.build_alu(op_base, self.map_reg(reg, size), src)
                     }
@@ -194,34 +187,79 @@ impl<'a> X86Decoder<'a> {
                         self.build_alu(op_base, Operand::Reg8(GpReg8::Al), Operand::Imm8(val))
                     }
                     5 => {
-                        // EAX / AX
                         let src = if size == OpSize::Word {
                             Operand::Imm16(self.read_u16())
                         } else {
                             Operand::Imm32(self.read_u32())
                         };
-                        self.build_alu(op_base, self.map_reg(0, size), src) // 0 = AL/AX/EAX
+                        self.build_alu(op_base, self.map_reg(0, size), src)
                     }
                     _ => Instr::Unknown(opcode),
                 }
             }
 
-            0x40..=0x47 => {
-                let size = if has_66 { OpSize::Word } else { OpSize::Dword };
-                Instr::Inc(self.map_reg(opcode - 0x40, size))
-            }
-            0x48..=0x4F => {
-                let size = if has_66 { OpSize::Word } else { OpSize::Dword };
-                Instr::Dec(self.map_reg(opcode - 0x48, size))
+            0x40..=0x47 => Instr::Inc(self.map_reg(
+                opcode - 0x40,
+                if has_66 { OpSize::Word } else { OpSize::Dword },
+            )),
+            0x48..=0x4F => Instr::Dec(self.map_reg(
+                opcode - 0x48,
+                if has_66 { OpSize::Word } else { OpSize::Dword },
+            )),
+
+            0x50..=0x57 => Instr::Push(self.map_reg(
+                opcode - 0x50,
+                if has_66 { OpSize::Word } else { OpSize::Dword },
+            )),
+            0x58..=0x5F => Instr::Pop(self.map_reg(
+                opcode - 0x58,
+                if has_66 { OpSize::Word } else { OpSize::Dword },
+            )),
+
+            0x80..=0x83 => {
+                let size = if opcode == 0x80 || opcode == 0x82 {
+                    OpSize::Byte
+                } else if has_66 {
+                    OpSize::Word
+                } else {
+                    OpSize::Dword
+                };
+                let (dest, reg_op) = self.decode_modrm(size);
+                let imm = match opcode {
+                    0x80 | 0x82 => Operand::Imm8(self.read_u8()),
+                    0x81 => {
+                        if size == OpSize::Word {
+                            Operand::Imm16(self.read_u16())
+                        } else {
+                            Operand::Imm32(self.read_u32())
+                        }
+                    }
+                    0x83 => {
+                        if size == OpSize::Word {
+                            Operand::Imm16(self.read_u8() as i8 as i16 as u16)
+                        } else {
+                            Operand::Imm32(self.read_u8() as i8 as i32 as u32)
+                        }
+                    }
+                    _ => unreachable!(),
+                };
+                self.build_alu(reg_op << 3, dest, imm)
             }
 
-            0x50..=0x57 => {
-                let size = if has_66 { OpSize::Word } else { OpSize::Dword };
-                Instr::Push(self.map_reg(opcode - 0x50, size))
-            }
-            0x58..=0x5F => {
-                let size = if has_66 { OpSize::Word } else { OpSize::Dword };
-                Instr::Pop(self.map_reg(opcode - 0x58, size))
+            // TEST r/m, r
+            0x84 | 0x85 => {
+                let size = if opcode == 0x84 {
+                    OpSize::Byte
+                } else if has_66 {
+                    OpSize::Word
+                } else {
+                    OpSize::Dword
+                };
+                let (dest, reg) = self.decode_modrm(size);
+                Instr::Test {
+                    dest,
+                    src: self.map_reg(reg, size),
+                }
             }
 
             0x88 | 0x89 => {
@@ -253,14 +291,13 @@ impl<'a> X86Decoder<'a> {
                 }
             }
             0x8D => {
-                // LEA
                 let size = if has_66 { OpSize::Word } else { OpSize::Dword };
                 let (src, reg) = self.decode_modrm(size);
                 match src {
                     Operand::Mem32(addr) | Operand::Mem16(addr) | Operand::Mem8(addr) => {
                         let dest_reg = match self.map_reg(reg, size) {
                             Operand::Reg32(r) => r,
-                            Operand::Reg16(r) => unsafe { std::mem::transmute(r as u8) }, // Treat AX as EAX for base ast
+                            Operand::Reg16(r) => unsafe { std::mem::transmute(r as u8) },
                             _ => unreachable!(),
                         };
                         Instr::Lea {
@@ -272,35 +309,25 @@ impl<'a> X86Decoder<'a> {
                 }
             }
 
-            // Group 1 Immediates
-            0x80..=0x83 => {
-                let size = if opcode == 0x80 || opcode == 0x82 {
+            // TEST AL/EAX, imm
+            0xA8 | 0xA9 => {
+                let size = if opcode == 0xA8 {
                     OpSize::Byte
                 } else if has_66 {
                     OpSize::Word
                 } else {
                     OpSize::Dword
                 };
-                let (dest, reg_op) = self.decode_modrm(size);
-                let imm = match opcode {
-                    0x80 | 0x82 => Operand::Imm8(self.read_u8()),
-                    0x81 => {
-                        if size == OpSize::Word {
-                            Operand::Imm16(self.read_u16())
-                        } else {
-                            Operand::Imm32(self.read_u32())
-                        }
-                    }
-                    0x83 => {
-                        if size == OpSize::Word {
-                            Operand::Imm16(self.read_u8() as i8 as i16 as u16)
-                        } else {
-                            Operand::Imm32(self.read_u8() as i8 as i32 as u32)
-                        }
-                    }
-                    _ => unreachable!(),
+                let src = match size {
+                    OpSize::Byte => Operand::Imm8(self.read_u8()),
+                    OpSize::Word => Operand::Imm16(self.read_u16()),
+                    OpSize::Dword => Operand::Imm32(self.read_u32()),
                 };
-                self.build_alu(reg_op << 3, dest, imm)
+                // map_reg(0) is AL / AX / EAX
+                Instr::Test {
+                    dest: self.map_reg(0, size),
+                    src,
+                }
             }
 
             0xB8..=0xBF => {
@@ -312,6 +339,22 @@ impl<'a> X86Decoder<'a> {
                     Operand::Imm32(self.read_u32())
                 };
                 Instr::Mov { dest: reg, src }
+            }
+
+            0xC1 | 0xD3 => {
+                let size = if has_66 { OpSize::Word } else { OpSize::Dword };
+                let (dest, reg_op) = self.decode_modrm(size);
+                let count = if opcode == 0xC1 {
+                    Operand::Imm8(self.read_u8())
+                } else {
+                    Operand::Reg8(GpReg8::Cl)
+                };
+                match reg_op {
+                    4 | 6 => Instr::Shl { dest, count },
+                    5 => Instr::Shr { dest, count },
+                    7 => Instr::Sar { dest, count },
+                    _ => Instr::Unknown(opcode),
+                }
             }
 
             0xC6 | 0xC7 => {
@@ -331,16 +374,21 @@ impl<'a> X86Decoder<'a> {
                 Instr::Mov { dest, src }
             }
 
-            0xF7 => {
-                // Group 3
-                let size = if has_66 { OpSize::Word } else { OpSize::Dword };
+            0xF6 | 0xF7 => {
+                let size = if opcode == 0xF6 {
+                    OpSize::Byte
+                } else if has_66 {
+                    OpSize::Word
+                } else {
+                    OpSize::Dword
+                };
                 let (dest, reg_op) = self.decode_modrm(size);
                 match reg_op {
                     0 | 1 => {
-                        let src = if size == OpSize::Word {
-                            Operand::Imm16(self.read_u16())
-                        } else {
-                            Operand::Imm32(self.read_u32())
+                        let src = match size {
+                            OpSize::Byte => Operand::Imm8(self.read_u8()),
+                            OpSize::Word => Operand::Imm16(self.read_u16()),
+                            OpSize::Dword => Operand::Imm32(self.read_u32()),
                         };
                         Instr::Test { dest, src }
                     }
@@ -348,22 +396,6 @@ impl<'a> X86Decoder<'a> {
                     3 => Instr::Neg(dest),
                     4 => Instr::Mul(dest),
                     6 => Instr::Div(dest),
-                    _ => Instr::Unknown(opcode),
-                }
-            }
-
-            0xC1 | 0xD3 => {
-                let size = if has_66 { OpSize::Word } else { OpSize::Dword };
-                let (dest, reg_op) = self.decode_modrm(size);
-                let count = if opcode == 0xC1 {
-                    Operand::Imm8(self.read_u8())
-                } else {
-                    Operand::Reg8(GpReg8::Cl)
-                };
-                match reg_op {
-                    4 | 6 => Instr::Shl { dest, count },
-                    5 => Instr::Shr { dest, count },
-                    7 => Instr::Sar { dest, count },
                     _ => Instr::Unknown(opcode),
                 }
             }

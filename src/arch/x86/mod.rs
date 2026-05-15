@@ -69,10 +69,15 @@ impl X86Cpu {
         let next_pc = pc.wrapping_add(bytes as u32);
         self.regs[REG_EIP] = next_pc;
 
-        execute::execute_instr(self, instr, bus, hooks)?;
-
-        // Return true if the instruction caused a branch (EIP was manually overwritten)
-        Ok(self.regs[REG_EIP] != next_pc)
+        // Catch the execution error and rewind if necessary
+        match execute::execute_instr(self, instr, bus, hooks) {
+            Ok(()) => Ok(self.regs[REG_EIP] != next_pc),
+            Err(e) => {
+                // REWIND EIP so the debugger highlights the exact faulting line
+                self.regs[REG_EIP] = pc;
+                Err(e)
+            }
+        }
     }
 }
 
@@ -110,22 +115,16 @@ impl Cpu for X86Cpu {
         };
 
         while executed < max {
-            let mut branched = false;
-
-            // Hard unroll block for LLVM
+            // HOT LOOP: Hard unroll block for LLVM
+            // We don't break the outer loop on branches,
+            // we just let the CPU pipeline naturally continue at the new EIP.
             for _ in 0..16 {
                 if executed >= max {
                     break;
                 }
-                branched = self.execute_one_extended(bus, hooks, &options)?;
-                executed += 1;
-                if branched {
-                    break;
-                }
-            }
+                let _branched = self.execute_one_extended(bus, hooks, &options)?;
 
-            if branched {
-                break;
+                executed += 1;
             }
         }
         Ok(executed)
