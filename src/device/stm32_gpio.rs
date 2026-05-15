@@ -5,6 +5,12 @@ pub struct Stm32Gpio {
     registers: [u32; 8],
 }
 
+impl Default for Stm32Gpio {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Stm32Gpio {
     pub const fn new() -> Self {
         Self::new_with_pins([0; _])

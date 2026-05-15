@@ -338,31 +338,27 @@ fn decode_data_proc_or_misc(cond: Condition, raw: u32, is_immediate_op2: bool) -
                         };
                     }
                 }
-                0b10 => {
-                    if l {
-                        return Instr::Ldrsb {
-                            cond,
-                            rd,
-                            rn,
-                            offset,
-                            pre: p,
-                            writeback: w,
-                            up: u,
-                        };
-                    }
+                0b10 if l => {
+                    return Instr::Ldrsb {
+                        cond,
+                        rd,
+                        rn,
+                        offset,
+                        pre: p,
+                        writeback: w,
+                        up: u,
+                    };
                 }
-                0b11 => {
-                    if l {
-                        return Instr::Ldrsh {
-                            cond,
-                            rd,
-                            rn,
-                            offset,
-                            pre: p,
-                            writeback: w,
-                            up: u,
-                        };
-                    }
+                0b11 if l => {
+                    return Instr::Ldrsh {
+                        cond,
+                        rd,
+                        rn,
+                        offset,
+                        pre: p,
+                        writeback: w,
+                        up: u,
+                    };
                 }
                 _ => {}
             }

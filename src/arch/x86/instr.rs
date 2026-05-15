@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GpReg {
+pub enum GpReg32 {
     Eax = 0,
     Ecx = 1,
     Edx = 2,
@@ -11,31 +11,74 @@ pub enum GpReg {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpReg16 {
+    Ax = 0,
+    Cx = 1,
+    Dx = 2,
+    Bx = 3,
+    Sp = 4,
+    Bp = 5,
+    Si = 6,
+    Di = 7,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpReg8 {
+    Al = 0,
+    Cl = 1,
+    Dl = 2,
+    Bl = 3,
+    Ah = 4,
+    Ch = 5,
+    Dh = 6,
+    Bh = 7,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MemoryAddr {
-    pub base: Option<GpReg>,
-    pub index: Option<GpReg>,
-    pub scale: u8, // 1, 2, 4, 8
+    pub base: Option<GpReg32>,
+    pub index: Option<GpReg32>,
+    pub scale: u8,
     pub disp: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpSize {
+    Byte,
+    Word,
+    Dword,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operand {
-    Reg(GpReg),
-    Mem(MemoryAddr),
-    Imm8(u8),
-    Imm16(u16),
+    Reg32(GpReg32),
+    Reg16(GpReg16),
+    Reg8(GpReg8),
+    Mem32(MemoryAddr),
+    Mem16(MemoryAddr),
+    Mem8(MemoryAddr),
     Imm32(u32),
+    Imm16(u16),
+    Imm8(u8),
+}
+
+impl Operand {
+    pub fn size(&self) -> OpSize {
+        match self {
+            Operand::Reg8(_) | Operand::Mem8(_) | Operand::Imm8(_) => OpSize::Byte,
+            Operand::Reg16(_) | Operand::Mem16(_) | Operand::Imm16(_) => OpSize::Word,
+            Operand::Reg32(_) | Operand::Mem32(_) | Operand::Imm32(_) => OpSize::Dword,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instr {
-    // Data Movement
     Mov { dest: Operand, src: Operand },
     Push(Operand),
     Pop(Operand),
-    Lea { dest: GpReg, src: MemoryAddr },
+    Lea { dest: GpReg32, src: MemoryAddr },
 
-    // Arithmetic / Logical
     Add { dest: Operand, src: Operand },
     Adc { dest: Operand, src: Operand },
     Sub { dest: Operand, src: Operand },
