@@ -25,7 +25,14 @@ impl HyperEmu {
                 }
             }
             Arch::X86 => {
-                return Err(EmuError::NotImplemented("x86 CPU not supported"));
+                #[cfg(feature = "x86")]
+                {
+                    Box::new(crate::arch::x86::X86Cpu::init(mode)?)
+                }
+                #[cfg(not(feature = "x86"))]
+                {
+                    return Err(EmuError::NotImplemented("X86 CPU not enabled"));
+                }
             }
         };
 
