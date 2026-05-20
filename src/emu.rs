@@ -34,6 +34,16 @@ impl HyperEmu {
                     return Err(EmuError::NotImplemented("X86 CPU not enabled"));
                 }
             }
+            Arch::Rv32i => {
+                #[cfg(feature = "rv32i")]
+                {
+                    Box::new(crate::arch::rv32i::RiscvCpu::init(mode)?)
+                }
+                #[cfg(not(feature = "rv32i"))]
+                {
+                    return Err(EmuError::NotImplemented("RISCV (32-bit) CPU not enabled"));
+                }
+            }
         };
 
         Ok(Self {

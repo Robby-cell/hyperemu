@@ -3,6 +3,7 @@
 pub enum Arch {
     Armv7 = 1,
     X86 = 2,
+    Rv32i = 3,
 }
 
 bitflags::bitflags! {

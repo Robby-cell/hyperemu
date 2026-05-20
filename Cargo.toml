@@ -7,13 +7,14 @@ description = "A multi-architecture hardware emulator"
 [features]
 default = ["full"]
 
-full = ["armv7", "x86", "elf", "gdb"]
+full = ["armv7", "x86", "rv32i", "elf", "gdb"]
 
 elf = ["dep:goblin"]
 gdb = ["dep:gdbstub", "dep:gdbstub_arch"]
 
 armv7 = []
 x86 = []
+rv32i = []
 
 [dependencies]
 bitflags = "2.11"
