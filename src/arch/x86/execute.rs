@@ -271,6 +271,190 @@ pub fn execute_instr(
             }
         }
 
+        // String Operations & Transformations
+        Instr::Lods(size, rep) => {
+            let step = get_string_step(cpu, size);
+            let do_lods = |cpu: &mut X86Cpu, bus: &mut MemoryBus| -> Result<(), EmuError> {
+                let esi = cpu.regs[REG_ESI];
+                let val = match size {
+                    OpSize::Byte => bus.read_8(esi as u64)? as u32,
+                    OpSize::Word => bus.read_16(esi as u64)? as u32,
+                    OpSize::Dword => bus.read_32(esi as u64)?,
+                };
+                cpu.regs[REG_ESI] = esi.wrapping_add(step);
+                match size {
+                    OpSize::Byte => cpu.regs[REG_EAX] = (cpu.regs[REG_EAX] & 0xFFFFFF00) | val,
+                    OpSize::Word => cpu.regs[REG_EAX] = (cpu.regs[REG_EAX] & 0xFFFF0000) | val,
+                    OpSize::Dword => cpu.regs[REG_EAX] = val,
+                }
+                Ok(())
+            };
+            if rep.is_some() {
+                while cpu.regs[REG_ECX] > 0 {
+                    do_lods(cpu, bus)?;
+                    cpu.regs[REG_ECX] = cpu.regs[REG_ECX].wrapping_sub(1);
+                }
+            } else {
+                do_lods(cpu, bus)?;
+            }
+        }
+        Instr::Stos(size, rep) => {
+            let step = get_string_step(cpu, size);
+            let val = match size {
+                OpSize::Byte => cpu.regs[REG_EAX] & 0xFF,
+                OpSize::Word => cpu.regs[REG_EAX] & 0xFFFF,
+                OpSize::Dword => cpu.regs[REG_EAX],
+            };
+            let do_stos = |cpu: &mut X86Cpu, bus: &mut MemoryBus| -> Result<(), EmuError> {
+                let edi = cpu.regs[REG_EDI];
+                match size {
+                    OpSize::Byte => bus.write_8(edi as u64, val as u8)?,
+                    OpSize::Word => bus.write_16(edi as u64, val as u16)?,
+                    OpSize::Dword => bus.write_32(edi as u64, val)?,
+                }
+                cpu.regs[REG_EDI] = edi.wrapping_add(step);
+                Ok(())
+            };
+            if rep.is_some() {
+                while cpu.regs[REG_ECX] > 0 {
+                    do_stos(cpu, bus)?;
+                    cpu.regs[REG_ECX] = cpu.regs[REG_ECX].wrapping_sub(1);
+                }
+            } else {
+                do_stos(cpu, bus)?;
+            }
+        }
+        Instr::Movs(size, rep) => {
+            let step = get_string_step(cpu, size);
+            let do_movs = |cpu: &mut X86Cpu, bus: &mut MemoryBus| -> Result<(), EmuError> {
+                let esi = cpu.regs[REG_ESI];
+                let edi = cpu.regs[REG_EDI];
+                let val = match size {
+                    OpSize::Byte => bus.read_8(esi as u64)? as u32,
+                    OpSize::Word => bus.read_16(esi as u64)? as u32,
+                    OpSize::Dword => bus.read_32(esi as u64)?,
+                };
+                match size {
+                    OpSize::Byte => bus.write_8(edi as u64, val as u8)?,
+                    OpSize::Word => bus.write_16(edi as u64, val as u16)?,
+                    OpSize::Dword => bus.write_32(edi as u64, val)?,
+                }
+                cpu.regs[REG_ESI] = esi.wrapping_add(step);
+                cpu.regs[REG_EDI] = edi.wrapping_add(step);
+                Ok(())
+            };
+            if rep.is_some() {
+                while cpu.regs[REG_ECX] > 0 {
+                    do_movs(cpu, bus)?;
+                    cpu.regs[REG_ECX] = cpu.regs[REG_ECX].wrapping_sub(1);
+                }
+            } else {
+                do_movs(cpu, bus)?;
+            }
+        }
+        Instr::Scas(size, rep) => {
+            let step = get_string_step(cpu, size);
+            let do_scas = |cpu: &mut X86Cpu, bus: &mut MemoryBus| -> Result<(), EmuError> {
+                let edi = cpu.regs[REG_EDI];
+                let val = match size {
+                    OpSize::Byte => bus.read_8(edi as u64)? as u32,
+                    OpSize::Word => bus.read_16(edi as u64)? as u32,
+                    OpSize::Dword => bus.read_32(edi as u64)?,
+                };
+                let eax_val = match size {
+                    OpSize::Byte => cpu.regs[REG_EAX] & 0xFF,
+                    OpSize::Word => cpu.regs[REG_EAX] & 0xFFFF,
+                    OpSize::Dword => cpu.regs[REG_EAX],
+                };
+                do_sub(cpu, eax_val, val, false, size); // Updates Flags
+                cpu.regs[REG_EDI] = edi.wrapping_add(step);
+                Ok(())
+            };
+            if let Some(r) = rep {
+                while cpu.regs[REG_ECX] > 0 {
+                    do_scas(cpu, bus)?;
+                    cpu.regs[REG_ECX] = cpu.regs[REG_ECX].wrapping_sub(1);
+                    let zf = (cpu.regs[REG_EFLAGS] & EFlags::ZF.bits()) != 0;
+                    if r == RepPrefix::Rep && !zf {
+                        break;
+                    } // REPE/REPZ ends if ZF=0
+                    if r == RepPrefix::Repne && zf {
+                        break;
+                    } // REPNE/REPNZ ends if ZF=1
+                }
+            } else {
+                do_scas(cpu, bus)?;
+            }
+        }
+        Instr::Cmps(size, rep) => {
+            let step = get_string_step(cpu, size);
+            let do_cmps = |cpu: &mut X86Cpu, bus: &mut MemoryBus| -> Result<(), EmuError> {
+                let esi = cpu.regs[REG_ESI];
+                let edi = cpu.regs[REG_EDI];
+                let src_val = match size {
+                    OpSize::Byte => bus.read_8(esi as u64)? as u32,
+                    OpSize::Word => bus.read_16(esi as u64)? as u32,
+                    OpSize::Dword => bus.read_32(esi as u64)?,
+                };
+                let dst_val = match size {
+                    OpSize::Byte => bus.read_8(edi as u64)? as u32,
+                    OpSize::Word => bus.read_16(edi as u64)? as u32,
+                    OpSize::Dword => bus.read_32(edi as u64)?,
+                };
+                do_sub(cpu, src_val, dst_val, false, size); // Updates Flags
+                cpu.regs[REG_ESI] = esi.wrapping_add(step);
+                cpu.regs[REG_EDI] = edi.wrapping_add(step);
+                Ok(())
+            };
+            if let Some(r) = rep {
+                while cpu.regs[REG_ECX] > 0 {
+                    do_cmps(cpu, bus)?;
+                    cpu.regs[REG_ECX] = cpu.regs[REG_ECX].wrapping_sub(1);
+                    let zf = (cpu.regs[REG_EFLAGS] & EFlags::ZF.bits()) != 0;
+                    if r == RepPrefix::Rep && !zf {
+                        break;
+                    }
+                    if r == RepPrefix::Repne && zf {
+                        break;
+                    }
+                }
+            } else {
+                do_cmps(cpu, bus)?;
+            }
+        }
+        Instr::Cld => cpu.regs[REG_EFLAGS] &= !EFlags::DF.bits(),
+        Instr::Std => cpu.regs[REG_EFLAGS] |= EFlags::DF.bits(),
+        Instr::Cbw(size) => match size {
+            OpSize::Word => {
+                let al = (cpu.regs[REG_EAX] & 0xFF) as i8;
+                cpu.regs[REG_EAX] = (cpu.regs[REG_EAX] & 0xFFFF0000) | ((al as i16 as u16) as u32);
+            }
+            OpSize::Dword => {
+                let ax = (cpu.regs[REG_EAX] & 0xFFFF) as i16;
+                cpu.regs[REG_EAX] = ax as i32 as u32;
+            }
+            OpSize::Byte => unreachable!(),
+        },
+        Instr::Cwd(size) => match size {
+            OpSize::Word => {
+                let ax = (cpu.regs[REG_EAX] & 0xFFFF) as i16;
+                let dx = if ax < 0 { 0xFFFF } else { 0 };
+                cpu.regs[REG_EDX] = (cpu.regs[REG_EDX] & 0xFFFF0000) | dx;
+            }
+            OpSize::Dword => {
+                let eax = cpu.regs[REG_EAX] as i32;
+                cpu.regs[REG_EDX] = if eax < 0 { 0xFFFFFFFF } else { 0 };
+            }
+            OpSize::Byte => unreachable!(),
+        },
+        Instr::Syscall | Instr::Sysret | Instr::Sysenter | Instr::Sysexit => {
+            return Err(EmuError::NotImplemented("Syscall/Sysenter instructions"));
+        }
+        Instr::In(_, _) => return Err(EmuError::NotImplemented("Port I/O (IN)")),
+        Instr::Out(_, _) => return Err(EmuError::NotImplemented("Port I/O (OUT)")),
+        Instr::Ins(_, _) => return Err(EmuError::NotImplemented("Port I/O (INS)")),
+        Instr::Outs(_, _) => return Err(EmuError::NotImplemented("Port I/O (OUTS)")),
+
         Instr::Int(vec) => {
             let handled = hooks.trigger_interrupt(cpu, bus, vec as u32)?;
             if !handled {
@@ -500,4 +684,15 @@ fn calc_addr(cpu: &X86Cpu, m: MemoryAddr) -> u64 {
         addr = addr.wrapping_add((cpu.regs[idx as usize] as i32).wrapping_mul(m.scale as i32));
     }
     addr as u32 as u64
+}
+
+#[inline(always)]
+fn get_string_step(cpu: &X86Cpu, size: OpSize) -> u32 {
+    let df = cpu.regs[REG_EFLAGS] & EFlags::DF.bits() != 0;
+    let step = match size {
+        OpSize::Byte => 1,
+        OpSize::Word => 2,
+        OpSize::Dword => 4,
+    };
+    if df { (0u32).wrapping_sub(step) } else { step }
 }

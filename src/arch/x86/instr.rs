@@ -72,6 +72,12 @@ impl Operand {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepPrefix {
+    Rep,
+    Repne,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instr {
     Mov { dest: Operand, src: Operand },
@@ -101,6 +107,25 @@ pub enum Instr {
     Sar { dest: Operand, count: Operand },
     Movzx8 { dest: Operand, src: Operand }, // Zero-extend 8-bit to 32-bit
     Movsx8 { dest: Operand, src: Operand }, // Sign-extend 8-bit to 32-bit
+
+    // String Operations & Flags
+    Lods(OpSize, Option<RepPrefix>),
+    Stos(OpSize, Option<RepPrefix>),
+    Movs(OpSize, Option<RepPrefix>),
+    Scas(OpSize, Option<RepPrefix>),
+    Cmps(OpSize, Option<RepPrefix>),
+    Ins(OpSize, Option<RepPrefix>),
+    Outs(OpSize, Option<RepPrefix>),
+    Cld,
+    Std,
+    Cbw(OpSize),
+    Cwd(OpSize),
+    Syscall,
+    Sysret,
+    Sysenter,
+    Sysexit,
+    In(OpSize, Operand),
+    Out(OpSize, Operand),
 
     // Control Flow
     Jmp(i32), // Relative

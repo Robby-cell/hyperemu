@@ -547,3 +547,165 @@ fn test_x86_16bit_override_prefix() {
         "16-bit memory write failed"
     );
 }
+
+// String Ops, Conversions, Flags, etc.
+#[test]
+fn test_x86_string_ops_and_flags() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // Setup
+    cpu.regs[REG_EAX] = 0xAABBCCDD;
+    cpu.regs[REG_EDI] = 0x1000;
+    cpu.regs[REG_ESI] = 0x1004;
+    bus.write_32(0x1004, 0x11223344).unwrap();
+
+    // STOSD (Write EAX to [EDI], EDI += 4)
+    execute_instr(
+        &mut cpu,
+        Instr::Stos(OpSize::Dword, None),
+        &mut bus,
+        &mut hooks,
+    )
+    .unwrap();
+    assert_eq!(bus.read_32(0x1000).unwrap(), 0xAABBCCDD);
+    assert_eq!(cpu.regs[REG_EDI], 0x1004);
+
+    // LODSD (Read [ESI] to EAX, ESI += 4)
+    execute_instr(
+        &mut cpu,
+        Instr::Lods(OpSize::Dword, None),
+        &mut bus,
+        &mut hooks,
+    )
+    .unwrap();
+    assert_eq!(cpu.regs[REG_EAX], 0x11223344);
+    assert_eq!(cpu.regs[REG_ESI], 0x1008);
+
+    // STD (Set Direction Flag)
+    execute_instr(&mut cpu, Instr::Std, &mut bus, &mut hooks).unwrap();
+    assert!((cpu.regs[REG_EFLAGS] & EFlags::DF.bits()) != 0);
+
+    // MOVSB (Copy [ESI] to [EDI], ESI -= 1, EDI -= 1)
+    cpu.regs[REG_ESI] = 0x1004; // 0x44 (little endian of 0x11223344)
+    cpu.regs[REG_EDI] = 0x1008;
+    execute_instr(
+        &mut cpu,
+        Instr::Movs(OpSize::Byte, None),
+        &mut bus,
+        &mut hooks,
+    )
+    .unwrap();
+    assert_eq!(bus.read_8(0x1008).unwrap(), 0x44);
+    assert_eq!(cpu.regs[REG_ESI], 0x1003);
+    assert_eq!(cpu.regs[REG_EDI], 0x1007);
+}
+
+#[test]
+fn test_x86_rep_scas_cmps() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // Write a string: "Hello"
+    bus.write_bytes(0x1000, b"Hello").unwrap();
+
+    // REPNE SCASB (Search for 'l' in "Hello")
+    cpu.regs[REG_EDI] = 0x1000;
+    cpu.regs[REG_ECX] = 5;
+    cpu.regs[REG_EAX] = b'l' as u32; // Search for 'l' (0x6C)
+
+    // CLD (Ensure DF=0)
+    execute_instr(&mut cpu, Instr::Cld, &mut bus, &mut hooks).unwrap();
+    assert!((cpu.regs[REG_EFLAGS] & EFlags::DF.bits()) == 0);
+
+    execute_instr(
+        &mut cpu,
+        Instr::Scas(OpSize::Byte, Some(RepPrefix::Repne)),
+        &mut bus,
+        &mut hooks,
+    )
+    .unwrap();
+
+    // Execution trace:
+    // "H" (1000) != 'l' -> dec ECX (4), inc EDI (1001)
+    // "e" (1001) != 'l' -> dec ECX (3), inc EDI (1002)
+    // "l" (1002) == 'l' -> dec ECX (2), inc EDI (1003), STOP (ZF=1)
+    assert_eq!(cpu.regs[REG_ECX], 2);
+    assert_eq!(cpu.regs[REG_EDI], 0x1003);
+    assert!(
+        (cpu.regs[REG_EFLAGS] & EFlags::ZF.bits()) != 0,
+        "Zero flag should be set on match"
+    );
+}
+
+#[test]
+fn test_x86_binary_rep_movs() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // F3 A4 : REP MOVSB
+    let code = [0xF3, 0xA4];
+    bus.write_bytes(0x1000, &code).unwrap();
+
+    bus.write_bytes(0x1500, b"ABC").unwrap();
+    cpu.regs[REG_ESI] = 0x1500;
+    cpu.regs[REG_EDI] = 0x1600;
+    cpu.regs[REG_ECX] = 3;
+    cpu.regs[REG_EIP] = 0x1000;
+
+    cpu.step(&mut bus, &mut hooks).unwrap();
+
+    let mut out = vec![0u8; 3];
+    bus.read_bytes(0x1600, &mut out).unwrap();
+    assert_eq!(&out, b"ABC");
+    assert_eq!(cpu.regs[REG_ECX], 0);
+    assert_eq!(cpu.regs[REG_ESI], 0x1503);
+    assert_eq!(cpu.regs[REG_EDI], 0x1603);
+}
+
+#[test]
+fn test_x86_conversions() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // CBW (AL -> AX)
+    cpu.regs[REG_EAX] = 0x000000FE; // -2 in AL
+    execute_instr(&mut cpu, Instr::Cbw(OpSize::Word), &mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EAX], 0x0000FFFE); // -2 in AX
+
+    // CWDE (AX -> EAX), maps to Cbw(OpSize::Dword)
+    execute_instr(&mut cpu, Instr::Cbw(OpSize::Dword), &mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EAX], 0xFFFFFFFE); // -2 in EAX
+
+    // CWD (AX -> DX:AX)
+    cpu.regs[REG_EAX] = 0x00008000; // -32768 in AX
+    cpu.regs[REG_EDX] = 0x00000000;
+    execute_instr(&mut cpu, Instr::Cwd(OpSize::Word), &mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EDX], 0x0000FFFF); // DX is all 1s
+
+    // CDQ (EAX -> EDX:EAX), maps to Cwd(OpSize::Dword)
+    cpu.regs[REG_EAX] = 0x7FFFFFFF; // Positive
+    cpu.regs[REG_EDX] = 0xFFFFFFFF;
+    execute_instr(&mut cpu, Instr::Cwd(OpSize::Dword), &mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_EDX], 0x00000000); // EDX is all 0s
+}
+
+#[test]
+fn test_x86_unimplemented_io_and_system() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // IN AL, 0x40
+    let res = execute_instr(
+        &mut cpu,
+        Instr::In(OpSize::Byte, Operand::Imm8(0x40)),
+        &mut bus,
+        &mut hooks,
+    );
+    assert!(matches!(
+        res,
+        Err(crate::error::EmuError::NotImplemented(_))
+    ));
+
+    // SYSCALL
+    let res2 = execute_instr(&mut cpu, Instr::Syscall, &mut bus, &mut hooks);
+    assert!(matches!(
+        res2,
+        Err(crate::error::EmuError::NotImplemented(_))
+    ));
+}

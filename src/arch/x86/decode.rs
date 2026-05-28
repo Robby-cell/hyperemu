@@ -122,11 +122,28 @@ impl<'a> X86Decoder<'a> {
 
     pub fn decode_instr(&mut self) -> Instr {
         let mut has_66 = false;
+        let mut rep = None;
         let mut opcode = self.read_u8();
 
-        while opcode == 0x66 {
-            has_66 = true;
-            opcode = self.read_u8();
+        loop {
+            match opcode {
+                0x66 => {
+                    has_66 = true;
+                    opcode = self.read_u8();
+                }
+                0xF2 => {
+                    rep = Some(RepPrefix::Repne);
+                    opcode = self.read_u8();
+                }
+                0xF3 => {
+                    rep = Some(RepPrefix::Rep);
+                    opcode = self.read_u8();
+                }
+                0x2E | 0x36 | 0x3E | 0x26 | 0x64 | 0x65 => {
+                    opcode = self.read_u8();
+                } // Ignore segment overrides
+                _ => break,
+            }
         }
 
         match opcode {
@@ -136,6 +153,10 @@ impl<'a> X86Decoder<'a> {
                 let op2 = self.read_u8();
                 let size = if has_66 { OpSize::Word } else { OpSize::Dword };
                 match op2 {
+                    0x05 => Instr::Syscall,
+                    0x07 => Instr::Sysret,
+                    0x34 => Instr::Sysenter,
+                    0x35 => Instr::Sysexit,
                     0x80..=0x8F => Instr::Jcc(
                         unsafe { std::mem::transmute(op2 - 0x80) },
                         self.read_u32() as i32,
@@ -400,10 +421,51 @@ impl<'a> X86Decoder<'a> {
                 }
             }
 
+            0x6C => Instr::Ins(OpSize::Byte, rep),
+            0x6D => Instr::Ins(if has_66 { OpSize::Word } else { OpSize::Dword }, rep),
+            0x6E => Instr::Outs(OpSize::Byte, rep),
+            0x6F => Instr::Outs(if has_66 { OpSize::Word } else { OpSize::Dword }, rep),
+            0x98 => Instr::Cbw(if has_66 { OpSize::Word } else { OpSize::Dword }),
+            0x99 => Instr::Cwd(if has_66 { OpSize::Word } else { OpSize::Dword }),
+            0xA4 => Instr::Movs(OpSize::Byte, rep),
+            0xA5 => Instr::Movs(if has_66 { OpSize::Word } else { OpSize::Dword }, rep),
+            0xA6 => Instr::Cmps(OpSize::Byte, rep),
+            0xA7 => Instr::Cmps(if has_66 { OpSize::Word } else { OpSize::Dword }, rep),
+            0xAA => Instr::Stos(OpSize::Byte, rep),
+            0xAB => Instr::Stos(if has_66 { OpSize::Word } else { OpSize::Dword }, rep),
+            0xAC => Instr::Lods(OpSize::Byte, rep),
+            0xAD => Instr::Lods(if has_66 { OpSize::Word } else { OpSize::Dword }, rep),
+            0xAE => Instr::Scas(OpSize::Byte, rep),
+            0xAF => Instr::Scas(if has_66 { OpSize::Word } else { OpSize::Dword }, rep),
+
             0xE8 => Instr::Call(self.read_u32() as i32),
             0xC3 => Instr::Ret,
             0xC9 => Instr::Leave,
+            0xCC => Instr::Int(3),
             0xCD => Instr::Int(self.read_u8()),
+
+            0xE4 => Instr::In(OpSize::Byte, Operand::Imm8(self.read_u8())),
+            0xE5 => Instr::In(
+                if has_66 { OpSize::Word } else { OpSize::Dword },
+                Operand::Imm8(self.read_u8()),
+            ),
+            0xE6 => Instr::Out(OpSize::Byte, Operand::Imm8(self.read_u8())),
+            0xE7 => Instr::Out(
+                if has_66 { OpSize::Word } else { OpSize::Dword },
+                Operand::Imm8(self.read_u8()),
+            ),
+            0xEC => Instr::In(OpSize::Byte, Operand::Reg16(GpReg16::Dx)),
+            0xED => Instr::In(
+                if has_66 { OpSize::Word } else { OpSize::Dword },
+                Operand::Reg16(GpReg16::Dx),
+            ),
+            0xEE => Instr::Out(OpSize::Byte, Operand::Reg16(GpReg16::Dx)),
+            0xEF => Instr::Out(
+                if has_66 { OpSize::Word } else { OpSize::Dword },
+                Operand::Reg16(GpReg16::Dx),
+            ),
+            0xFC => Instr::Cld,
+            0xFD => Instr::Std,
 
             0x70..=0x7F => Instr::Jcc(
                 unsafe { std::mem::transmute(opcode - 0x70) },
