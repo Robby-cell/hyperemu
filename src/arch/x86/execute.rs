@@ -271,6 +271,32 @@ pub fn execute_instr(
             }
         }
 
+        Instr::Loop(rel) => {
+            cpu.regs[REG_ECX] = cpu.regs[REG_ECX].wrapping_sub(1);
+            if cpu.regs[REG_ECX] != 0 {
+                cpu.regs[REG_EIP] = (cpu.regs[REG_EIP] as i32).wrapping_add(rel) as u32;
+            }
+        }
+        Instr::Loope(rel) => {
+            cpu.regs[REG_ECX] = cpu.regs[REG_ECX].wrapping_sub(1);
+            let zf = (cpu.regs[REG_EFLAGS] & EFlags::ZF.bits()) != 0;
+            if cpu.regs[REG_ECX] != 0 && zf {
+                cpu.regs[REG_EIP] = (cpu.regs[REG_EIP] as i32).wrapping_add(rel) as u32;
+            }
+        }
+        Instr::Loopne(rel) => {
+            cpu.regs[REG_ECX] = cpu.regs[REG_ECX].wrapping_sub(1);
+            let zf = (cpu.regs[REG_EFLAGS] & EFlags::ZF.bits()) != 0;
+            if cpu.regs[REG_ECX] != 0 && !zf {
+                cpu.regs[REG_EIP] = (cpu.regs[REG_EIP] as i32).wrapping_add(rel) as u32;
+            }
+        }
+        Instr::Jecxz(rel) => {
+            if cpu.regs[REG_ECX] == 0 {
+                cpu.regs[REG_EIP] = (cpu.regs[REG_EIP] as i32).wrapping_add(rel) as u32;
+            }
+        }
+
         // String Operations & Transformations
         Instr::Lods(size, rep) => {
             let step = get_string_step(cpu, size);

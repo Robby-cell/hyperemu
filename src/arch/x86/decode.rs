@@ -444,6 +444,11 @@ impl<'a> X86Decoder<'a> {
             0xCC => Instr::Int(3),
             0xCD => Instr::Int(self.read_u8()),
 
+            0xE0 => Instr::Loopne(self.read_u8() as i8 as i32),
+            0xE1 => Instr::Loope(self.read_u8() as i8 as i32),
+            0xE2 => Instr::Loop(self.read_u8() as i8 as i32),
+            0xE3 => Instr::Jecxz(self.read_u8() as i8 as i32),
+
             0xE4 => Instr::In(OpSize::Byte, Operand::Imm8(self.read_u8())),
             0xE5 => Instr::In(
                 if has_66 { OpSize::Word } else { OpSize::Dword },

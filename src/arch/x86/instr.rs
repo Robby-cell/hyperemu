@@ -130,6 +130,10 @@ pub enum Instr {
     // Control Flow
     Jmp(i32), // Relative
     Jcc(Condition, i32),
+    Loop(i32),
+    Loope(i32),
+    Loopne(i32),
+    Jecxz(i32),
     Call(i32),
     Ret,
     Leave,

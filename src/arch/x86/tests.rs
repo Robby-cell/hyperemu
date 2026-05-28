@@ -709,3 +709,30 @@ fn test_x86_unimplemented_io_and_system() {
         Err(crate::error::EmuError::NotImplemented(_))
     ));
 }
+
+#[test]
+fn test_x86_loop_instructions() {
+    let (mut cpu, mut bus, mut hooks) = setup_test_env();
+
+    // Let's execute a LOOP that jumps back to itself (offset -2) until ECX is 0.
+    // LOOP -2 is 0xE2 0xFE
+    let code: [u8; 2] = [0xE2, 0xFE];
+    bus.write_bytes(0x1000, &code).unwrap();
+
+    cpu.regs[REG_EIP] = 0x1000;
+    cpu.regs[REG_ECX] = 3;
+
+    // Step 1: ECX goes 3 -> 2, jumps back to 0x1000
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_ECX], 2);
+    assert_eq!(cpu.regs[REG_EIP], 0x1000);
+
+    // Step 2: ECX goes 2 -> 1, jumps back to 0x1000
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_ECX], 1);
+
+    // Step 3: ECX goes 1 -> 0, DOES NOT jump back, EIP proceeds past the instruction (0x1002)
+    cpu.step(&mut bus, &mut hooks).unwrap();
+    assert_eq!(cpu.regs[REG_ECX], 0);
+    assert_eq!(cpu.regs[REG_EIP], 0x1002);
+}
