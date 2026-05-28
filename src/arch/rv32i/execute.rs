@@ -18,50 +18,60 @@ pub fn execute_instr(
     bus: &mut MemoryBus,
     hooks: &mut HookRegistry,
 ) -> Result<(), EmuError> {
-    let pc = cpu.pc;
+    // Pipeline synchronization:
+    // The CPU struct's PC has already been advanced by 4 by the fetcher (next_pc).
+    // We isolate the "current_pc" for relative jumps.
+    let next_pc = cpu.pc;
+    let current_pc = next_pc.wrapping_sub(4);
 
     match instr {
         Instr::Lui { rd, imm } => write_reg(cpu, rd, imm),
-        Instr::Auipc { rd, imm } => write_reg(cpu, rd, pc.wrapping_add(imm)),
+
+        // AUIPC is relative to the CURRENT instruction's PC
+        Instr::Auipc { rd, imm } => write_reg(cpu, rd, current_pc.wrapping_add(imm)),
 
         Instr::Jal { rd, imm } => {
-            write_reg(cpu, rd, pc.wrapping_add(4));
-            cpu.pc = (pc as i32).wrapping_add(imm) as u32;
+            // Return address is exactly the NEXT instruction (which is already next_pc)
+            write_reg(cpu, rd, next_pc);
+            // Jump is relative to CURRENT instruction
+            cpu.pc = (current_pc as i32).wrapping_add(imm) as u32;
         }
         Instr::Jalr { rd, rs1, imm } => {
             let target = (cpu.regs[rs1 as usize] as i32).wrapping_add(imm) as u32;
-            write_reg(cpu, rd, pc.wrapping_add(4));
+            // Return address is exactly the NEXT instruction (which is already next_pc)
+            write_reg(cpu, rd, next_pc);
             cpu.pc = target & !1;
         }
 
+        // All Branches are relative to the CURRENT instruction's PC
         Instr::Beq { rs1, rs2, imm } => {
             if cpu.regs[rs1 as usize] == cpu.regs[rs2 as usize] {
-                cpu.pc = (pc as i32).wrapping_add(imm) as u32;
+                cpu.pc = (current_pc as i32).wrapping_add(imm) as u32;
             }
         }
         Instr::Bne { rs1, rs2, imm } => {
             if cpu.regs[rs1 as usize] != cpu.regs[rs2 as usize] {
-                cpu.pc = (pc as i32).wrapping_add(imm) as u32;
+                cpu.pc = (current_pc as i32).wrapping_add(imm) as u32;
             }
         }
         Instr::Blt { rs1, rs2, imm } => {
             if (cpu.regs[rs1 as usize] as i32) < (cpu.regs[rs2 as usize] as i32) {
-                cpu.pc = (pc as i32).wrapping_add(imm) as u32;
+                cpu.pc = (current_pc as i32).wrapping_add(imm) as u32;
             }
         }
         Instr::Bge { rs1, rs2, imm } => {
             if (cpu.regs[rs1 as usize] as i32) >= (cpu.regs[rs2 as usize] as i32) {
-                cpu.pc = (pc as i32).wrapping_add(imm) as u32;
+                cpu.pc = (current_pc as i32).wrapping_add(imm) as u32;
             }
         }
         Instr::Bltu { rs1, rs2, imm } => {
             if cpu.regs[rs1 as usize] < cpu.regs[rs2 as usize] {
-                cpu.pc = (pc as i32).wrapping_add(imm) as u32;
+                cpu.pc = (current_pc as i32).wrapping_add(imm) as u32;
             }
         }
         Instr::Bgeu { rs1, rs2, imm } => {
             if cpu.regs[rs1 as usize] >= cpu.regs[rs2 as usize] {
-                cpu.pc = (pc as i32).wrapping_add(imm) as u32;
+                cpu.pc = (current_pc as i32).wrapping_add(imm) as u32;
             }
         }
 
