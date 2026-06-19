@@ -46,11 +46,15 @@ impl HyperEmu {
             }
         };
 
-        Ok(Self {
+        Ok(Self::new_with_cpu(cpu))
+    }
+
+    pub const fn new_with_cpu(cpu: Box<dyn Cpu>) -> Self {
+        Self {
             cpu,
             bus: MemoryBus::new(),
             hooks: HookRegistry::new(),
-        })
+        }
     }
 
     pub fn mem_map(&mut self, start: u64, size: u64, perms: Perms, device: BusDevice) {
